@@ -1,0 +1,241 @@
+
+<div id="authScreen">
+<div class="auth-box">
+<h1>🌷 Petal & Vine</h1>
+<p>Flower Shop Management System</p>
+
+<div id="authChoices">
+<button class="btn primary" onclick="showAuth('admin')">👑 Admin Login</button>
+<button class="btn secondary" onclick="showAuth('customer')">👤 Customer Login</button>
+<button class="btn outline" onclick="showAuth('register')">✨ Create an Account</button>
+</div>
+
+<form id="loginForm" class="hidden">
+<h2 id="loginTitle">Login</h2>
+<label>Username</label>
+<input id="loginUsername" required placeholder="Enter username">
+
+<label>Password</label>
+<div class="password-wrap">
+<input id="loginPassword" type="password" required placeholder="Enter password">
+<button type="button" class="eye" onclick="togglePassword('loginPassword',this)">👁️</button>
+</div>
+
+<p id="loginError" class="error"></p>
+<button class="btn primary" type="submit">Login</button>
+<button class="btn light" type="button" onclick="backToChoices()">Back</button>
+</form>
+
+<form id="registerForm" class="hidden">
+<h2>Create Customer Account</h2>
+
+<label>Full Name</label>
+<input id="regFullName" required maxlength="100" placeholder="Enter your full name">
+
+<label>Username</label>
+<input id="regUsername" required minlength="3" maxlength="30" placeholder="Choose a username">
+
+<label>Password</label>
+<div class="password-wrap">
+<input id="regPassword" type="password" required minlength="6" placeholder="Create password">
+<button type="button" class="eye" onclick="togglePassword('regPassword',this)">👁️</button>
+</div>
+
+<label>Confirm Password</label>
+<div class="password-wrap">
+<input id="regConfirm" type="password" required placeholder="Confirm password">
+<button type="button" class="eye" onclick="togglePassword('regConfirm',this)">👁️</button>
+</div>
+
+<p id="registerError" class="error"></p>
+<button class="btn primary" type="submit">Create Account</button>
+<button class="btn light" type="button" onclick="backToChoices()">Back</button>
+</form>
+</div>
+</div>
+
+<div id="app" class="hidden">
+<header>
+<div>
+<h1>🌷 Petal & Vine</h1>
+<p>Flower Shop Management System | Binalonan, Pangasinan</p>
+</div>
+<div class="user-area">
+<span id="welcomeUser"></span>
+<button class="btn light" onclick="logout()">Logout</button>
+</div>
+</header>
+
+<nav id="navigation"></nav>
+
+<main>
+<section id="dashboard" class="page">
+<div class="hero">
+<h2>Welcome to Petal & Vine! 🌸</h2>
+<p id="dashboardMessage">Manage your flower shop.</p>
+</div>
+
+<div class="stats">
+<div class="stat-card">
+<h3 id="statProducts">0</h3>
+<p>Total Products</p>
+</div>
+<div class="stat-card">
+<h3 id="statOrders">0</h3>
+<p>Total Orders</p>
+</div>
+<div class="stat-card">
+<h3 id="statCustomers">0</h3>
+<p>Registered Customers</p>
+</div>
+<div class="stat-card">
+<h3 id="statRevenue">₱0.00</h3>
+<p>Completed Sales</p>
+</div>
+</div>
+
+<div class="section-head">
+<h2>🌺 Flower Collection</h2>
+</div>
+<div id="dashboardProducts" class="product-grid"></div>
+</section>
+
+<section id="inventory" class="page">
+<div class="section-head">
+<h2>🌸 Product Inventory</h2>
+<button class="btn primary admin-only" onclick="openProductForm()">+ Add Product</button>
+</div>
+
+<div class="panel admin-only hidden" id="productEditor">
+<h2 id="editorTitle">Add New Product</h2>
+<form id="productForm">
+<input type="hidden" id="productId">
+
+<label>Product Name</label>
+<input id="productName" required maxlength="100">
+
+<label>Category</label>
+<select id="productCategory">
+<option value="Roses">Roses</option>
+<option value="Sunflowers">Sunflowers</option>
+<option value="Tulips">Tulips</option>
+<option value="Lilies">Lilies</option>
+<option value="Bouquets">Bouquets</option>
+<option value="Gifts">Gifts</option>
+<option value="Other">Other</option>
+</select>
+
+<label>Flower Icon</label>
+<select id="productEmoji">
+<option>🌹</option>
+<option>🌻</option>
+<option>🌷</option>
+<option>💮</option>
+<option>💐</option>
+<option>🎁</option>
+<option>🌸</option>
+<option>🪴</option>
+</select>
+
+<label>Price (₱)</label>
+<input id="productPrice" type="number" min="0.01" step="0.01" required>
+
+<label>Stock Quantity</label>
+<input id="productStock" type="number" min="0" step="1" required>
+
+<div class="actions">
+<button class="btn primary" type="submit">Save Product</button>
+<button class="btn light" type="button" onclick="closeProductForm()">Cancel</button>
+</div>
+</form>
+</div>
+
+<div class="toolbar">
+<input id="inventorySearch" placeholder="🔍 Search products...">
+</div>
+
+<div id="inventoryProducts" class="product-grid"></div>
+</section>
+
+<section id="shop" class="page">
+<div class="hero">
+<h2>🌷 Welcome to Our Flower Shop!</h2>
+<p>Choose your favorite flowers and gifts.</p>
+</div>
+
+<input id="shopSearch" placeholder="🔍 Search flowers and gifts...">
+<div id="shopProducts" class="product-grid"></div>
+</section>
+
+<section id="cart" class="page">
+<h2>🛒 My Shopping Cart</h2>
+<div class="panel">
+<div id="cartItems"></div>
+<h3 id="cartTotal">Total: ₱0.00</h3>
+
+<form id="checkoutForm">
+<h3>Customer Details</h3>
+
+<label>Full Name</label>
+<input id="checkoutName" required>
+
+<label>Contact Number</label>
+<input id="checkoutPhone" required>
+
+<label>Delivery Address</label>
+<textarea id="checkoutAddress" required></textarea>
+
+<label>Payment Method</label>
+<select id="paymentMethod">
+<option>Cash on Delivery</option>
+<option>GCash</option>
+<option>Bank Transfer</option>
+</select>
+
+<button class="btn primary" type="submit">Confirm Purchase</button>
+</form>
+</div>
+</section>
+
+<section id="orders" class="page">
+<h2>📦 <span id="ordersTitle">Orders</span></h2>
+<div id="ordersList"></div>
+</section>
+
+<section id="customers" class="page">
+<h2>👥 Registered Customers</h2>
+<div id="customersList"></div>
+</section>
+
+<section id="reports" class="page">
+<h2>📊 Sales Reports</h2>
+<div class="stats">
+<div class="stat-card">
+<h3 id="reportRevenue">₱0.00</h3>
+<p>Total Completed Sales</p>
+</div>
+<div class="stat-card">
+<h3 id="reportCompleted">0</h3>
+<p>Completed Orders</p>
+</div>
+<div class="stat-card">
+<h3 id="reportPending">0</h3>
+<p>Pending Orders</p>
+</div>
+</div>
+</section>
+
+<section id="about" class="page">
+<div class="panel">
+<h2>ℹ️ About Petal & Vine</h2>
+<p>Petal & Vine is a flower shop management system for managing flowers, inventory, customer purchases, and sales.</p>
+<p>📍 Binalonan, Pangasinan</p>
+</div>
+</section>
+</main>
+
+<footer>© 2026 Petal & Vine · Made with 🌷</footer>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
