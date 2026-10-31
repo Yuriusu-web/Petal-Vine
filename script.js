@@ -1,16 +1,13 @@
 
 /* =====================================================
    PETAL & VINE FLOWER BOUTIQUE
-   COMPLETE CONNECTED JAVASCRIPT
-   Customer + Admin + Products + Cart + Checkout
-   Selected Checkout + Receipts + Printing
-   Transactions + Password Toggles
-   Front-end demonstration using localStorage
+   Complete connected JavaScript
+   Front-end application using localStorage
 ===================================================== */
 
 "use strict";
 
-/* -------------------- STORAGE -------------------- */
+/* ==================== STORAGE ==================== */
 
 const STORAGE = {
   users: "pv_users",
@@ -22,71 +19,124 @@ const STORAGE = {
 
 const $ = id => document.getElementById(id);
 
-const on = (id, event, callback) => {
-  const element = $(id);
-  if (element) element.addEventListener(event, callback);
-};
-
-let users = read(STORAGE.users, []);
-let products = read(STORAGE.products, []);
-let orders = read(STORAGE.orders, []);
-let carts = read(STORAGE.cart, {});
-
-let currentUser = null;
-let currentPage = "shop";
-let pendingPurchase = null;
-let checkoutSource = null;
-let selectedImage = "";
-let toastTimer = null;
-
-// Cart selection is remembered while the customer uses the cart.
-let selectedCartProducts = new Set();
-let cartSelectionInitializedUsers = new Set();
-
-/* -------------------- STORAGE HELPERS -------------------- */
-
-function read(key, fallback) {
+function load(key, fallback) {
   try {
     const value = localStorage.getItem(key);
     return value ? JSON.parse(value) : fallback;
-  } catch (error) {
+  } catch {
     return fallback;
   }
 }
 
 function save(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch (error) {
-    console.error("Storage error:", error);
-    showToast("Unable to save. Browser storage may be full.");
-    return false;
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+let users = load(STORAGE.users, []);
+let products = load(STORAGE.products, []);
+let orders = load(STORAGE.orders, []);
+let carts = load(STORAGE.cart, {});
+let session = load(STORAGE.session, null);
+
+let currentUser = null;
+let cart = [];
+let pendingCheckout = [];
+let selectedImage = "";
+let toastTimer;
+
+/* ==================== DEFAULT DATA ==================== */
+
+const defaultProducts = [
+  {
+    id: "P001",
+    name: "Classic Red Roses",
+    category: "Roses",
+    description: "A beautiful bouquet of fresh red roses.",
+    price: 850,
+    stock: 20,
+    image: "🌹"
+  },
+  {
+    id: "P002",
+    name: "Pink Tulip Bouquet",
+    category: "Tulips",
+    description: "Soft pink tulips perfect for special moments.",
+    price: 950,
+    stock: 15,
+    image: "🌷"
+  },
+  {
+    id: "P003",
+    name: "Sunflower Delight",
+    category: "Sunflowers",
+    description: "Bright sunflowers to bring happiness.",
+    price: 750,
+    stock: 18,
+    image: "🌻"
+  },
+  {
+    id: "P004",
+    name: "White Lily Elegance",
+    category: "Lilies",
+    description: "Elegant white lilies for meaningful occasions.",
+    price: 1100,
+    stock: 12,
+    image: "💐"
+  },
+  {
+    id: "P005",
+    name: "Purple Orchid",
+    category: "Orchids",
+    description: "A graceful arrangement of purple orchids.",
+    price: 1250,
+    stock: 10,
+    image: "🪻"
+  },
+  {
+    id: "P006",
+    name: "Mixed Flower Bouquet",
+    category: "Mixed",
+    description: "A colorful combination of seasonal flowers.",
+    price: 1500,
+    stock: 14,
+    image: "💐"
   }
+];
+
+function initializeData() {
+  if (!Array.isArray(users)) users = [];
+  if (!Array.isArray(products)) products = [];
+  if (!Array.isArray(orders)) orders = [];
+  if (!carts || typeof carts !== "object" || Array.isArray(carts)) {
+    carts = {};
+  }
+
+  if (!users.some(user => user.role === "admin")) {
+    users.push({
+      id: "ADMIN001",
+      name: "Administrator",
+      username: "admin",
+      password: "Admin123",
+      role: "admin",
+      active: true,
+      phone: "",
+      address: ""
+    });
+  }
+
+  if (products.length === 0) {
+    products = defaultProducts.map(product => ({ ...product }));
+  }
+
+  save(STORAGE.users, users);
+  save(STORAGE.products, products);
+  save(STORAGE.orders, orders);
+  save(STORAGE.cart, carts);
 }
 
-function persistAll() {
-  return (
-    save(STORAGE.users, users) &&
-    save(STORAGE.products, products) &&
-    save(STORAGE.orders, orders) &&
-    save(STORAGE.cart, carts)
-  );
-}
+initializeData();
 
-/* -------------------- GENERAL HELPERS -------------------- */
-
-function makeId(prefix = "ID") {
-  return prefix + Date.now().toString(36) +
-    Math.random().toString(36).slice(2, 7);
-}
-
-function money(amount) {
-  return "₱" + Number(amount || 0).toLocaleString("en-PH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
-}
+/* ==================== HELPERS ==================== */
 
 function escapeHTML(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -94,23 +144,37 @@ function escapeHTML(value) {
     "<": "&lt;",
     ">": "&gt;",
     '"': "&quot;",
-    "'": "&#39;"
+    "'": "&#039;"
   })[char]);
+}
+
+function money(value) {
+  return "₱" + Number(value || 0).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+function makeId(prefix = "ID") {
+  return prefix + Date.now().toString(36).toUpperCase() +
+    Math.random().toString(36).slice(2, 7).toUpperCase();
+}
+
+function persistAll() {
+  save(STORAGE.users, users);
+  save(STORAGE.products, products);
+  save(STORAGE.orders, orders);
+  save(STORAGE.cart, carts);
 }
 
 function showToast(message) {
   const toast = $("toast");
-
-  if (!toast) {
-    console.log(message);
-    return;
-  }
+  if (!toast) return;
 
   toast.textContent = message;
   toast.classList.add("show");
 
   clearTimeout(toastTimer);
-
   toastTimer = setTimeout(() => {
     toast.classList.remove("show");
   }, 2800);
@@ -124,323 +188,77 @@ function setMessage(id, message, success = false) {
   element.style.color = success ? "#477b5a" : "#b64b55";
 }
 
-function emptyState(title, description) {
-  return `
-    <div class="empty-state">
-      <strong>${escapeHTML(title)}</strong>
-      ${escapeHTML(description)}
-    </div>
-  `;
+function getProduct(id) {
+  return products.find(product => product.id === id);
 }
 
-function formatDate(date) {
-  const parsed = new Date(date);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return "Date unavailable";
-  }
-
-  return parsed.toLocaleString("en-PH");
+function getUser(id) {
+  return users.find(user => user.id === id);
 }
 
-function findProduct(id) {
-  return products.find(product =>
-    String(product.id) === String(id)
-  );
-}
-
-function findUser(id) {
-  return users.find(user =>
-    String(user.id) === String(id)
-  );
-}
-
-function isAdmin() {
-  return currentUser?.role === "admin";
+function getCustomerOrders() {
+  return orders.filter(order => order.userId === currentUser.id);
 }
 
 function getCart() {
   if (!currentUser) return [];
-  return Array.isArray(carts[currentUser.id])
-    ? carts[currentUser.id]
-    : [];
+  return carts[currentUser.id] || [];
 }
 
-function getOrderStatusClass(status) {
-  if (status === "Completed") return "green";
-  if (status === "Cancelled") return "red";
-  return "";
-}
-
-function getPaymentStatusClass(status) {
-  if (status === "Paid") return "green";
-  if (status === "Cancelled") return "red";
-  return "";
-}
-
-/* -------------------- CART STORAGE -------------------- */
-
-function setCart(items) {
-  if (!currentUser) return false;
-
-  const previous = [...getCart()];
-  carts[currentUser.id] = items;
-
-  if (!save(STORAGE.cart, carts)) {
-    carts[currentUser.id] = previous;
-    return false;
-  }
-
+function updateCartStorage() {
+  if (!currentUser) return;
+  carts[currentUser.id] = cart;
+  save(STORAGE.cart, carts);
   updateCartCount();
-  return true;
 }
 
-/* -------------------- PRODUCT IMAGE -------------------- */
+function updateCartCount() {
+  if (!$("cartCount")) return;
 
-function getImageMarkup(product) {
-  const image = product.image || "💐";
-
-  if (/^(https?:\/\/|data:image\/)/i.test(image)) {
-    return `
-      <div class="product-image">
-        <img
-          src="${escapeHTML(image)}"
-          alt="${escapeHTML(product.name)}"
-          onerror="this.style.display='none';this.parentElement.textContent='💐'"
-        >
-      </div>
-    `;
-  }
-
-  return `
-    <div class="product-image">
-      ${escapeHTML(image)}
-    </div>
-  `;
+  const count = cart.reduce((sum, item) => sum + Number(item.quantity), 0);
+  $("cartCount").textContent = count;
 }
 
-/* -------------------- INITIAL DATA -------------------- */
-
-function initializeData() {
-  if (!Array.isArray(users)) users = [];
-  if (!Array.isArray(products)) products = [];
-  if (!Array.isArray(orders)) orders = [];
-
-  if (!carts || typeof carts !== "object" || Array.isArray(carts)) {
-    carts = {};
-  }
-
-  // Remove invalid saved products before normalizing them.
-  // This prevents broken products from becoming fake "Flower" entries.
-  const originalProducts = products.length;
-  const seenIds = new Set();
-
-  products = products.filter(product => {
-    if (!product || typeof product !== "object") return false;
-
-    const id = String(product.id || "").trim();
-    const name = String(product.name || "").trim();
-    const category = String(product.category || "").trim();
-
-    const price = Number(product.price);
-    const stock = Number(product.stock);
-
-    if (!id || !name || !category) return false;
-    if (!Number.isFinite(price) || price <= 0) return false;
-    if (!Number.isInteger(stock) || stock < 0) return false;
-    if (seenIds.has(id)) return false;
-
-    seenIds.add(id);
-    return true;
-  });
-
-  if (products.length !== originalProducts) {
-    console.log(
-      `${originalProducts - products.length} invalid product(s) removed.`
-    );
-  }
-
-  // Create administrator if none exists.
-  if (!users.some(user => user.role === "admin")) {
-    users.push({
-      id: makeId("USR"),
-      name: "Shop Administrator",
-      username: "admin",
-      password: "admin123",
-      role: "admin",
-      phone: "",
-      address: "",
-      active: true,
-      createdAt: new Date().toISOString()
-    });
-  }
-
-  const defaults = [
-    ["Classic Red Roses", "Roses", "A timeless bouquet of beautiful red roses.", 850, 30, "🌹"],
-    ["Pink Rose Bouquet", "Roses", "Soft pink roses for sweet celebrations.", 780, 25, "🌸"],
-    ["White Roses", "Roses", "Elegant white roses for special moments.", 900, 20, "🤍"],
-    ["Sunflower Bliss", "Sunflowers", "Bright sunflowers to make someone's day.", 650, 25, "🌻"],
-    ["Tulip Garden", "Tulips", "A colorful arrangement of fresh tulips.", 950, 18, "🌷"],
-    ["Purple Dreams", "Mixed Flowers", "A charming purple floral arrangement.", 880, 16, "💜"],
-    ["Baby's Breath", "Mixed Flowers", "Delicate blooms for a gentle gift.", 550, 30, "🤍"],
-    ["Pink Carnations", "Carnations", "Lovely carnations for someone special.", 720, 22, "🌺"],
-    ["Orchid Elegance", "Orchids", "Beautiful orchids with a graceful finish.", 1200, 12, "🪻"],
-    ["Daisy Delight", "Daisies", "Cheerful daisies in a lovely arrangement.", 600, 28, "🌼"],
-    ["Mixed Romance", "Mixed Flowers", "A romantic mix of seasonal flowers.", 1100, 15, "💐"],
-    ["White Lily Bouquet", "Lilies", "Elegant lilies with a soft fragrance.", 980, 14, "🌼"],
-    ["Peach Roses", "Roses", "Warm peach roses for thoughtful gifts.", 820, 20, "🌹"],
-    ["Blue Hydrangea", "Hydrangeas", "A lovely arrangement of blue blooms.", 1350, 10, "💠"],
-    ["Lavender Love", "Mixed Flowers", "A calming lavender-inspired bouquet.", 890, 17, "🪻"],
-    ["Garden Party", "Mixed Flowers", "A cheerful mix of garden favorites.", 1050, 13, "💐"],
-    ["Mini Rose Bouquet", "Roses", "A smaller bouquet for simple surprises.", 450, 35, "🌹"],
-    ["Golden Sunflowers", "Sunflowers", "A bright golden bouquet full of joy.", 750, 19, "🌻"]
-  ];
-
-  // Seed defaults only if there are no valid saved products.
-  if (products.length === 0) {
-    products = defaults.map(item => ({
-      id: makeId("PRD"),
-      name: item[0],
-      category: item[1],
-      description: item[2],
-      price: item[3],
-      stock: item[4],
-      image: item[5]
-    }));
-  }
-
-  products = products.map(product => ({
-    ...product,
-    id: String(product.id),
-    name: String(product.name).trim(),
-    category: String(product.category).trim(),
-    description: String(product.description || ""),
-    price: Number(product.price),
-    stock: Number(product.stock),
-    image: product.image || "💐"
-  }));
-
-  // Remove deleted or unavailable products from all carts.
-  Object.keys(carts).forEach(userId => {
-    carts[userId] = (Array.isArray(carts[userId]) ? carts[userId] : [])
-      .filter(item => findProduct(item.productId));
-  });
-
-  persistAll();
-}
-
-initializeData();
-
-/* -------------------- PASSWORD VISIBILITY -------------------- */
-
-function togglePassword(inputId, button) {
-  const input = $(inputId);
-  if (!input || !button) return;
-
-  const showing = input.type === "text";
-
-  input.type = showing ? "password" : "text";
-  button.textContent = showing ? "👁" : "🙈";
-
-  button.setAttribute(
-    "aria-label",
-    showing ? "Show password" : "Hide password"
-  );
-
-  button.title = showing ? "Show password" : "Hide password";
-}
-
-function enhancePasswordFields() {
-  const passwordIds = [
-    "loginPassword",
-    "registerPassword",
-    "registerConfirm",
-    "profilePassword",
-    "settingsPassword",
-    "settingsConfirm"
-  ];
-
-  passwordIds.forEach(id => {
-    const input = $(id);
-    if (!input || input.dataset.toggleAdded === "true") return;
-
-    const parent = input.parentElement;
-
-    const existingButton = parent?.querySelector(
-      `button[onclick*="${id}"]`
-    );
-
-    if (existingButton) {
-      existingButton.type = "button";
-      existingButton.textContent = "👁";
-      existingButton.classList.add("password-toggle");
-      existingButton.setAttribute("aria-label", "Show password");
-      existingButton.title = "Show password";
-      input.dataset.toggleAdded = "true";
-      return;
-    }
-
-    const wrapper = document.createElement("div");
-    wrapper.className = "password-field";
-
-    input.parentNode.insertBefore(wrapper, input);
-    wrapper.appendChild(input);
-
-    const button = document.createElement("button");
-
-    button.type = "button";
-    button.className = "password-toggle";
-    button.textContent = "👁";
-    button.setAttribute("aria-label", "Show password");
-    button.title = "Show password";
-
-    button.addEventListener("click", () => {
-      togglePassword(id, button);
-    });
-
-    wrapper.appendChild(button);
-    input.dataset.toggleAdded = "true";
-  });
-}
-
-/* -------------------- AUTHENTICATION -------------------- */
+/* ==================== AUTHENTICATION ==================== */
 
 function showLogin() {
-  $("loginForm")?.classList.remove("hidden");
-  $("registerForm")?.classList.add("hidden");
-  $("authSwitch")?.classList.remove("hidden");
-  $("loginSwitch")?.classList.add("hidden");
+  $("loginForm").classList.remove("hidden");
+  $("registerForm").classList.add("hidden");
 
-  if ($("authTitle")) $("authTitle").textContent = "Welcome Back";
+  $("authSwitch").classList.remove("hidden");
+  $("loginSwitch").classList.add("hidden");
 
-  if ($("authSubtitle")) {
-    $("authSubtitle").textContent =
-      "Sign in to continue to your flower shop.";
-  }
+  $("authTitle").textContent = "Welcome Back";
+  $("authSubtitle").textContent = "Sign in to continue to your flower shop.";
 
   setMessage("loginMessage", "");
   setMessage("registerMessage", "");
 }
 
 function showRegister() {
-  $("loginForm")?.classList.add("hidden");
-  $("registerForm")?.classList.remove("hidden");
-  $("authSwitch")?.classList.add("hidden");
-  $("loginSwitch")?.classList.remove("hidden");
+  $("loginForm").classList.add("hidden");
+  $("registerForm").classList.remove("hidden");
 
-  if ($("authTitle")) $("authTitle").textContent = "Create Account";
+  $("authSwitch").classList.add("hidden");
+  $("loginSwitch").classList.remove("hidden");
 
-  if ($("authSubtitle")) {
-    $("authSubtitle").textContent = "Register your customer account.";
-  }
+  $("authTitle").textContent = "Create Account";
+  $("authSubtitle").textContent = "Register to start shopping.";
 
   setMessage("loginMessage", "");
   setMessage("registerMessage", "");
 }
 
-/* -------------------- REGISTER -------------------- */
+function togglePassword(id, button) {
+  const field = $(id);
+  if (!field) return;
 
-on("registerForm", "submit", event => {
+  const visible = field.type === "password";
+  field.type = visible ? "text" : "password";
+  button.textContent = visible ? "Hide" : "Show";
+}
+
+function register(event) {
   event.preventDefault();
 
   const name = $("registerName").value.trim();
@@ -452,24 +270,17 @@ on("registerForm", "submit", event => {
     return setMessage("registerMessage", "Please enter your full name.");
   }
 
-  if (username.length < 3) {
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
     return setMessage(
       "registerMessage",
-      "Username must have at least 3 characters."
-    );
-  }
-
-  if (!/^[a-zA-Z0-9_.-]+$/.test(username)) {
-    return setMessage(
-      "registerMessage",
-      "Username may contain letters, numbers, dots, _ or - only."
+      "Username must be 3–20 characters and use only letters, numbers, or underscores."
     );
   }
 
   if (password.length < 6) {
     return setMessage(
       "registerMessage",
-      "Password must have at least 6 characters."
+      "Password must contain at least 6 characters."
     );
   }
 
@@ -483,50 +294,41 @@ on("registerForm", "submit", event => {
     return setMessage("registerMessage", "Username is already taken.");
   }
 
-  const newUser = {
-    id: makeId("USR"),
+  users.push({
+    id: makeId("USER"),
     name,
     username,
     password,
     role: "customer",
+    active: true,
     phone: "",
     address: "",
-    active: true,
     createdAt: new Date().toISOString()
-  };
+  });
 
-  users.push(newUser);
-
-  if (!save(STORAGE.users, users)) {
-    users.pop();
-    return;
-  }
+  persistAll();
 
   $("registerForm").reset();
   showLogin();
 
-  if ($("loginUsername")) {
-    $("loginUsername").value = username;
-  }
+  $("loginUsername").value = username;
 
   setMessage(
     "loginMessage",
-    "Account created successfully. Please log in.",
+    "Account created successfully. You can now log in.",
     true
   );
-});
+}
 
-/* -------------------- LOGIN -------------------- */
-
-on("loginForm", "submit", event => {
+function login(event) {
   event.preventDefault();
 
-  const username = $("loginUsername").value.trim().toLowerCase();
+  const username = $("loginUsername").value.trim();
   const password = $("loginPassword").value;
 
-  const user = users.find(account =>
-    account.username.toLowerCase() === username &&
-    account.password === password
+  const user = users.find(item =>
+    item.username.toLowerCase() === username.toLowerCase() &&
+    item.password === password
   );
 
   if (!user) {
@@ -534,90 +336,94 @@ on("loginForm", "submit", event => {
   }
 
   if (user.active === false) {
-    return setMessage(
-      "loginMessage",
-      "This account has been disabled. Contact the administrator."
-    );
+    return setMessage("loginMessage", "This account has been disabled.");
   }
 
   currentUser = user;
-  localStorage.setItem(STORAGE.session, user.id);
+  session = user.id;
+
+  save(STORAGE.session, session);
+
+  cart = getCart();
 
   $("loginForm").reset();
-  setMessage("loginMessage", "");
+  $("authScreen").classList.add("hidden");
+  $("appScreen").classList.remove("hidden");
+  $("logoutButton").classList.remove("hidden");
 
-  selectedCartProducts.clear();
-  openApplication();
-});
+  $("headerUser").textContent = "Welcome, " + user.name;
 
-function logout() {
-  currentUser = null;
-  pendingPurchase = null;
-  checkoutSource = null;
-  selectedCartProducts.clear();
+  $("customerNav").classList.toggle("hidden", user.role !== "customer");
+  $("adminNav").classList.toggle("hidden", user.role !== "admin");
 
-  localStorage.removeItem(STORAGE.session);
+  $("roleLabel").textContent =
+    user.role === "admin" ? "ADMINISTRATOR ACCOUNT" : "CUSTOMER ACCOUNT";
 
-  $("appScreen")?.classList.add("hidden");
-  $("authScreen")?.classList.remove("hidden");
+  $("welcomeText").textContent = "Welcome, " + user.name + "!";
 
-  if ($("headerUser")) $("headerUser").textContent = "";
-
-  closeAllModals();
-  showLogin();
-
-  if ($("loginUsername")) $("loginUsername").value = "";
-  if ($("loginPassword")) $("loginPassword").value = "";
-
-  showToast("You have logged out.");
-}
-
-function openApplication() {
-  if (!currentUser) return;
-
-  $("authScreen")?.classList.add("hidden");
-  $("appScreen")?.classList.remove("hidden");
-
-  if ($("headerUser")) {
-    $("headerUser").textContent =
-      `${currentUser.name} · ${currentUser.role}`;
-  }
-
-  if ($("roleLabel")) {
-    $("roleLabel").textContent =
-      isAdmin() ? "Administrator" : "Customer";
-  }
-
-  if ($("welcomeText")) {
-    $("welcomeText").textContent = `Welcome, ${currentUser.name}!`;
-  }
-
-  $("customerNav")?.classList.toggle("hidden", isAdmin());
-  $("adminNav")?.classList.toggle("hidden", !isAdmin());
-
-  if (isAdmin()) {
+  if (user.role === "admin") {
     adminPage("dashboard");
   } else {
     customerPage("shop");
   }
+
+  updateCartCount();
+  showToast("Welcome to Petal & Vine!");
+}
+
+function logout() {
+  currentUser = null;
+  session = null;
+  cart = [];
+
+  localStorage.removeItem(STORAGE.session);
+
+  $("appScreen").classList.add("hidden");
+  $("authScreen").classList.remove("hidden");
+  $("logoutButton").classList.add("hidden");
+
+  $("headerUser").textContent = "";
+
+  closeAllModals();
+  showLogin();
 }
 
 function restoreSession() {
-  const sessionId = localStorage.getItem(STORAGE.session);
-  if (!sessionId) return;
+  if (!session) return;
 
-  const user = findUser(sessionId);
+  const user = getUser(session);
 
-  if (!user || user.active === false) {
+  if (user && user.active !== false) {
+    currentUser = user;
+    cart = getCart();
+
+    $("authScreen").classList.add("hidden");
+    $("appScreen").classList.remove("hidden");
+    $("logoutButton").classList.remove("hidden");
+
+    $("headerUser").textContent = "Welcome, " + user.name;
+
+    $("customerNav").classList.toggle("hidden", user.role !== "customer");
+    $("adminNav").classList.toggle("hidden", user.role !== "admin");
+
+    $("roleLabel").textContent =
+      user.role === "admin" ? "ADMINISTRATOR ACCOUNT" : "CUSTOMER ACCOUNT";
+
+    $("welcomeText").textContent = "Welcome, " + user.name + "!";
+
+    if (user.role === "admin") {
+      adminPage("dashboard");
+    } else {
+      customerPage("shop");
+    }
+
+    updateCartCount();
+  } else {
     localStorage.removeItem(STORAGE.session);
-    return;
   }
-
-  currentUser = user;
-  openApplication();
 }
 
-/* -------------------- NAVIGATION -------------------- */
+/* ==================== NAVIGATION ==================== */
 
 function hideAllPages() {
   document.querySelectorAll(".page").forEach(page => {
@@ -629,63 +435,53 @@ function hideAllPages() {
   });
 }
 
-function activatePage(pageId, button) {
+function activatePage(id, button) {
   hideAllPages();
-  $(pageId)?.classList.remove("hidden");
+
+  const page = $(id);
+  if (page) page.classList.remove("hidden");
 
   if (button) button.classList.add("active");
 }
 
 function customerPage(page, button) {
-  if (!currentUser || isAdmin()) return;
+  if (!currentUser || currentUser.role !== "customer") return;
 
   const titles = {
     shop: "Shop Flowers",
     cart: "My Cart",
     orders: "My Orders",
     receipts: "My Receipts",
-    transactions: "My Transactions",
+    transactions: "Transactions",
     profile: "My Profile",
     about: "About Us"
   };
 
-  currentPage = page;
-
-  if ($("pageTitle")) {
-    $("pageTitle").textContent = titles[page] || "Petal & Vine";
-  }
-
   activatePage("customer-" + page, button);
+  $("pageTitle").textContent = titles[page] || "Petal & Vine";
 
   if (page === "shop") renderShop();
   if (page === "cart") renderCart();
   if (page === "orders") renderCustomerOrders();
   if (page === "receipts") renderCustomerReceipts();
-  if (page === "transactions") renderCustomerTransactions();
+  if (page === "transactions") renderTransactions();
   if (page === "profile") renderProfile();
-
-  updateCartCount();
 }
 
 function adminPage(page, button) {
-  if (!currentUser || !isAdmin()) return;
+  if (!currentUser || currentUser.role !== "admin") return;
 
   const titles = {
     dashboard: "Admin Dashboard",
     products: "Manage Products",
-    inventory: "Inventory Management",
+    inventory: "Inventory",
     orders: "Customer Orders",
-    users: "User Management",
+    users: "Customers",
     settings: "Admin Settings"
   };
 
-  currentPage = page;
-
-  if ($("pageTitle")) {
-    $("pageTitle").textContent = titles[page] || "Administration";
-  }
-
   activatePage("admin-" + page, button);
+  $("pageTitle").textContent = titles[page] || "Administration";
 
   if (page === "dashboard") renderDashboard();
   if (page === "products") renderAdminProducts();
@@ -695,36 +491,68 @@ function adminPage(page, button) {
   if (page === "settings") renderSettings();
 }
 
-/* -------------------- CUSTOMER SHOP -------------------- */
+/* ==================== PRODUCT IMAGES ==================== */
+
+function imageHTML(image, className = "product-image") {
+  const value = String(image || "💐");
+
+  if (/^https?:\/\//i.test(value) || value.startsWith("data:image/")) {
+    return `
+      <div class="${className}">
+        <img src="${escapeHTML(value)}" alt="Flower product"
+          onerror="this.parentElement.textContent='💐'">
+      </div>
+    `;
+  }
+
+  return `<div class="${className}">${escapeHTML(value)}</div>`;
+}
+
+function previewProductImage() {
+  const value = $("productImage").value.trim();
+  const preview = $("productImagePreview");
+
+  selectedImage = value;
+
+  if (/^https?:\/\//i.test(value) || value.startsWith("data:image/")) {
+    preview.innerHTML = `<img src="${escapeHTML(value)}" alt="Preview"
+      onerror="this.parentElement.textContent='💐'">`;
+  } else {
+    preview.textContent = value || "💐";
+  }
+}
+
+/* ==================== CUSTOMER SHOP ==================== */
 
 function renderShop() {
   const container = $("shopProducts");
   if (!container) return;
 
-  const search = $("productSearch")?.value.trim().toLowerCase() || "";
+  const search = $("productSearch").value.trim().toLowerCase();
 
   const filtered = products.filter(product =>
     product.name.toLowerCase().includes(search) ||
     product.category.toLowerCase().includes(search) ||
-    (product.description || "").toLowerCase().includes(search)
+    product.description.toLowerCase().includes(search)
   );
 
   if (!filtered.length) {
-    container.innerHTML = emptyState(
-      "No flowers found",
-      "Try another search or check back later."
-    );
+    container.innerHTML = `
+      <div class="empty-state">
+        <strong>No flowers found</strong>
+        Try another search.
+      </div>
+    `;
     return;
   }
 
   container.innerHTML = filtered.map(product => `
     <article class="product-card">
-      ${getImageMarkup(product)}
-
+      ${imageHTML(product.image)}
       <div class="product-info">
         <h3>${escapeHTML(product.name)}</h3>
         <p>${escapeHTML(product.category)}</p>
-        <p>${escapeHTML(product.description || "")}</p>
+        <p>${escapeHTML(product.description)}</p>
 
         <div class="price">${money(product.price)}</div>
 
@@ -734,35 +562,30 @@ function renderShop() {
             : "Out of stock"}
         </div>
 
-        <label class="quantity-label" for="quantity-${escapeHTML(product.id)}">
+        <label class="quantity-label" for="qty-${product.id}">
           Quantity
         </label>
 
         <input
           class="product-quantity"
-          id="quantity-${escapeHTML(product.id)}"
+          id="qty-${product.id}"
           type="number"
           min="1"
-          step="1"
           max="${product.stock}"
           value="1"
-          ${product.stock <= 0 ? "disabled" : ""}
+          ${product.stock < 1 ? "disabled" : ""}
         >
 
         <div class="product-actions">
-          <button
-            class="btn outline"
-            onclick="addToCart('${escapeHTML(product.id)}')"
-            ${product.stock <= 0 ? "disabled" : ""}
-          >
+          <button class="btn outline"
+            onclick="addToCart('${product.id}')"
+            ${product.stock < 1 ? "disabled" : ""}>
             Add to Cart
           </button>
 
-          <button
-            class="btn primary"
-            onclick="buyNow('${escapeHTML(product.id)}')"
-            ${product.stock <= 0 ? "disabled" : ""}
-          >
+          <button class="btn primary"
+            onclick="buyNow('${product.id}')"
+            ${product.stock < 1 ? "disabled" : ""}>
             Buy Now
           </button>
         </div>
@@ -771,223 +594,109 @@ function renderShop() {
   `).join("");
 }
 
-on("productSearch", "input", renderShop);
-
-function getChosenQuantity(productId) {
-  const input = $("quantity-" + productId);
-  const quantity = Number(input?.value);
-  const product = findProduct(productId);
+function getRequestedQuantity(product) {
+  const input = $("qty-" + product.id);
+  const quantity = Number(input?.value || 1);
 
   if (!Number.isInteger(quantity) || quantity < 1) {
-    showToast("Please enter a quantity of at least 1.");
-    return null;
-  }
-
-  if (!product) {
-    showToast("Product not found.");
-    return null;
+    showToast("Please enter a valid quantity.");
+    return 0;
   }
 
   if (quantity > product.stock) {
-    showToast(`Only ${product.stock} item(s) are available.`);
-    return null;
+    showToast("Not enough stock available.");
+    return 0;
   }
 
   return quantity;
 }
 
-function addToCart(productId) {
-  if (!currentUser || isAdmin()) return;
+function addToCart(id) {
+  const product = getProduct(id);
+  if (!product) return;
 
-  const product = findProduct(productId);
+  const quantity = getRequestedQuantity(product);
+  if (!quantity) return;
 
-  if (!product) {
-    return showToast("This flower is no longer available.");
-  }
-
-  const quantity = getChosenQuantity(productId);
-  if (quantity === null) return;
-
-  const cart = [...getCart()];
-
-  const existing = cart.find(item =>
-    String(item.productId) === String(productId)
-  );
-
-  const currentQuantity = existing ? Number(existing.quantity) : 0;
-  const newQuantity = currentQuantity + quantity;
+  const existing = cart.find(item => item.productId === id);
+  const newQuantity = (existing?.quantity || 0) + quantity;
 
   if (newQuantity > product.stock) {
-    return showToast(`Only ${product.stock} flower(s) are available.`);
+    showToast("Requested quantity exceeds available stock.");
+    return;
   }
 
   if (existing) {
     existing.quantity = newQuantity;
   } else {
-    cart.push({ productId: String(productId), quantity });
+    cart.push({
+      productId: id,
+      quantity
+    });
   }
 
-  if (!setCart(cart)) return;
-
-  // Newly added products are selected for checkout by default.
-  selectedCartProducts.add(String(productId));
-
-  showToast(`${product.name} added to your cart!`);
+  updateCartStorage();
+  showToast("Added to your shopping cart.");
 }
 
-function buyNow(productId) {
-  if (!currentUser || isAdmin()) return;
+function buyNow(id) {
+  const product = getProduct(id);
+  if (!product) return;
 
-  const product = findProduct(productId);
-  if (!product) return showToast("Product not found.");
+  const quantity = getRequestedQuantity(product);
+  if (!quantity) return;
 
-  const quantity = getChosenQuantity(productId);
-  if (quantity === null) return;
-
-  pendingPurchase = [{
-    productId: String(productId),
+  pendingCheckout = [{
+    productId: id,
     quantity
   }];
 
-  checkoutSource = "buyNow";
-  openCheckout(pendingPurchase);
+  openCheckout();
 }
 
-/* -------------------- CART -------------------- */
-
-function updateCartCount() {
-  if (!currentUser) {
-    if ($("cartCount")) $("cartCount").textContent = "0";
-    return;
-  }
-
-  const cart = getCart().filter(item => findProduct(item.productId));
-
-  if (cart.length !== getCart().length) {
-    carts[currentUser.id] = cart;
-    save(STORAGE.cart, carts);
-  }
-
-  const count = cart.reduce((total, item) =>
-    total + Number(item.quantity || 0), 0
-  );
-
-  if ($("cartCount")) {
-    $("cartCount").textContent = count;
-  }
-}
-
-function toggleCartSelection(productId, checked) {
-  productId = String(productId);
-
-  if (checked) {
-    selectedCartProducts.add(productId);
-  } else {
-    selectedCartProducts.delete(productId);
-  }
-
-  renderCart();
-}
-
-function toggleSelectAllCart(checked) {
-  if (!currentUser) return;
-
-  if (checked) {
-    getCart().forEach(item => {
-      selectedCartProducts.add(String(item.productId));
-    });
-  } else {
-    selectedCartProducts.clear();
-  }
-
-  renderCart();
-}
+/* ==================== CART ==================== */
 
 function renderCart() {
   const container = $("cartContent");
-  if (!container || !currentUser) return;
+  if (!container) return;
 
-  let cart = getCart().filter(item => findProduct(item.productId));
-
-  if (cart.length !== getCart().length) {
-    carts[currentUser.id] = cart;
-    save(STORAGE.cart, carts);
-  }
-
-  // Initially select all products for a customer's first cart visit.
-  if (!cartSelectionInitializedUsers.has(currentUser.id)) {
-    cart.forEach(item => {
-      selectedCartProducts.add(String(item.productId));
-    });
-
-    cartSelectionInitializedUsers.add(currentUser.id);
-  }
-
-  // Remove selections for products no longer in the cart.
-  const cartIds = new Set(
-    cart.map(item => String(item.productId))
-  );
-
-  selectedCartProducts.forEach(id => {
-    if (!cartIds.has(id)) selectedCartProducts.delete(id);
-  });
-
-  updateCartCount();
+  cart = cart.filter(item => getProduct(item.productId));
 
   if (!cart.length) {
-    container.innerHTML = emptyState(
-      "Your cart is empty",
-      "Browse our flowers and add your favorites."
-    );
+    container.innerHTML = `
+      <div class="empty-state">
+        <strong>Your cart is empty</strong>
+        Browse our flower collection and add your favorites.
+      </div>
+    `;
+    updateCartCount();
     return;
   }
 
-  let selectedTotal = 0;
-  let selectedCount = 0;
+  let total = 0;
 
   const rows = cart.map(item => {
-    const product = findProduct(item.productId);
-    if (!product) return "";
-
-    const id = String(product.id);
-    const quantity = Number(item.quantity);
-    const subtotal = product.price * quantity;
-    const selected = selectedCartProducts.has(id);
-
-    if (selected) {
-      selectedTotal += subtotal;
-      selectedCount++;
-    }
+    const product = getProduct(item.productId);
+    const subtotal = product.price * item.quantity;
+    total += subtotal;
 
     return `
       <div class="cart-row">
-        <div class="cart-select">
-          <input
-            type="checkbox"
-            aria-label="Select ${escapeHTML(product.name)}"
-            ${selected ? "checked" : ""}
-            onchange="toggleCartSelection('${escapeHTML(id)}',this.checked)"
-          >
-        </div>
-
         <div>
           <strong>${escapeHTML(product.name)}</strong>
           <p class="muted">${money(product.price)} each</p>
-          <p class="muted">Available: ${product.stock}</p>
         </div>
 
         <div>
-          <label for="cart-qty-${escapeHTML(id)}">Quantity</label>
-
+          <label for="cartqty-${product.id}">Quantity</label>
           <input
             class="qty-input"
-            id="cart-qty-${escapeHTML(id)}"
+            id="cartqty-${product.id}"
             type="number"
             min="1"
-            step="1"
             max="${product.stock}"
-            value="${quantity}"
-            onchange="updateCartQuantity('${escapeHTML(id)}',this.value)"
+            value="${item.quantity}"
+            onchange="changeCartQuantity('${product.id}',this.value)"
           >
         </div>
 
@@ -996,10 +705,8 @@ function renderCart() {
         </div>
 
         <div>
-          <button
-            class="btn danger small"
-            onclick="removeFromCart('${escapeHTML(id)}')"
-          >
+          <button class="btn danger small"
+            onclick="removeFromCart('${product.id}')">
             Remove
           </button>
         </div>
@@ -1007,52 +714,36 @@ function renderCart() {
     `;
   }).join("");
 
-  const allSelected = selectedCount === cart.length;
-
   container.innerHTML = `
     <div class="panel">
+      ${rows}
 
-      <div class="cart-selection-header">
-        <label>
-          <input
-            type="checkbox"
-            ${allSelected ? "checked" : ""}
-            onchange="toggleSelectAllCart(this.checked)"
-          >
-          Select All Products
-        </label>
-
-        <span>${selectedCount} of ${cart.length} selected</span>
+      <div class="cart-total">
+        <p>Cart Total</p>
+        <strong>${money(total)}</strong>
       </div>
 
-      ${rows}
-    </div>
+      <div class="product-actions">
+        <button class="btn outline" onclick="clearCart()">
+          Clear Cart
+        </button>
 
-    <div class="cart-total">
-      <p>Selected Products: <strong>${selectedCount}</strong></p>
-
-      <p>Selected Total</p>
-
-      <strong>${money(selectedTotal)}</strong>
-
-      <br><br>
-
-      <button
-        class="btn primary"
-        onclick="checkoutCart()"
-        ${selectedCount === 0 ? "disabled" : ""}
-      >
-        Checkout Selected Products
-      </button>
+        <button class="btn primary" onclick="checkoutCart()">
+          Proceed to Checkout
+        </button>
+      </div>
     </div>
   `;
+
+  updateCartCount();
 }
 
-function updateCartQuantity(productId, value) {
-  const product = findProduct(productId);
-  if (!product) return;
-
+function changeCartQuantity(id, value) {
+  const product = getProduct(id);
+  const item = cart.find(entry => entry.productId === id);
   const quantity = Number(value);
+
+  if (!product || !item) return;
 
   if (!Number.isInteger(quantity) || quantity < 1) {
     showToast("Quantity must be at least 1.");
@@ -1061,193 +752,126 @@ function updateCartQuantity(productId, value) {
   }
 
   if (quantity > product.stock) {
-    showToast(`Only ${product.stock} item(s) are available.`);
+    showToast("Quantity exceeds available stock.");
     renderCart();
     return;
   }
 
-  const cart = [...getCart()];
-
-  const item = cart.find(row =>
-    String(row.productId) === String(productId)
-  );
-
-  if (!item) return;
-
   item.quantity = quantity;
-
-  if (setCart(cart)) renderCart();
+  updateCartStorage();
+  renderCart();
 }
 
-function removeFromCart(productId) {
-  const cart = getCart().filter(item =>
-    String(item.productId) !== String(productId)
-  );
-
-  if (!setCart(cart)) return;
-
-  selectedCartProducts.delete(String(productId));
-
+function removeFromCart(id) {
+  cart = cart.filter(item => item.productId !== id);
+  updateCartStorage();
   renderCart();
-  showToast("Item removed from cart.");
+  showToast("Product removed from cart.");
+}
+
+function clearCart() {
+  if (!confirm("Are you sure you want to clear your cart?")) return;
+
+  cart = [];
+  updateCartStorage();
+  renderCart();
+  showToast("Your cart has been cleared.");
 }
 
 function checkoutCart() {
-  const cart = getCart();
-
-  // IMPORTANT: only checked products are purchased.
-  const selectedItems = cart.filter(item =>
-    selectedCartProducts.has(String(item.productId))
-  );
-
-  if (!selectedItems.length) {
-    return showToast("Please select at least one flower to checkout.");
+  if (!cart.length) {
+    showToast("Your cart is empty.");
+    return;
   }
 
-  for (const item of selectedItems) {
-    const product = findProduct(item.productId);
-
-    if (!product || Number(item.quantity) > product.stock) {
-      return showToast("A selected flower does not have enough stock.");
-    }
-  }
-
-  pendingPurchase = selectedItems.map(item => ({
-    productId: String(item.productId),
-    quantity: Number(item.quantity)
-  }));
-
-  checkoutSource = "cart";
-
-  openCheckout(pendingPurchase);
+  pendingCheckout = cart.map(item => ({ ...item }));
+  openCheckout();
 }
 
-/* -------------------- CHECKOUT -------------------- */
+/* ==================== CHECKOUT ==================== */
 
-function openCheckout(items) {
-  if (!items || !items.length || !currentUser) return;
+function openCheckout() {
+  if (!pendingCheckout.length) return;
 
-  for (const item of items) {
-    const product = findProduct(item.productId);
+  let total = 0;
 
-    if (
-      !product ||
-      !Number.isInteger(Number(item.quantity)) ||
-      Number(item.quantity) < 1 ||
-      Number(item.quantity) > product.stock
-    ) {
-      pendingPurchase = null;
-      checkoutSource = null;
+  const summary = pendingCheckout.map(item => {
+    const product = getProduct(item.productId);
+    if (!product) return "";
 
-      showToast("One or more items are no longer available.");
-      return;
-    }
-  }
+    const subtotal = product.price * item.quantity;
+    total += subtotal;
 
-  pendingPurchase = items.map(item => ({
-    productId: String(item.productId),
-    quantity: Number(item.quantity)
-  }));
-
-  const total = pendingPurchase.reduce((sum, item) => {
-    const product = findProduct(item.productId);
-    return sum + product.price * item.quantity;
-  }, 0);
-
-  if ($("checkoutSummary")) {
-    $("checkoutSummary").innerHTML = `
-      ${pendingPurchase.map(item => {
-        const product = findProduct(item.productId);
-
-        return `
-          <div class="receipt-line">
-            <span>
-              ${escapeHTML(product.name)} × ${item.quantity}
-            </span>
-            <strong>${money(product.price * item.quantity)}</strong>
-          </div>
-        `;
-      }).join("")}
-
-      <div class="receipt-total">
-        Total: ${money(total)}
+    return `
+      <div class="receipt-line">
+        <span>${escapeHTML(product.name)} × ${item.quantity}</span>
+        <strong>${money(subtotal)}</strong>
       </div>
-
-      <p class="muted">Payment: Cash on Delivery (COD)</p>
     `;
-  }
+  }).join("");
 
-  if ($("checkoutName")) {
-    $("checkoutName").value = currentUser.name || "";
-  }
+  $("checkoutSummary").innerHTML = `
+    ${summary}
+    <div class="receipt-total">Total: ${money(total)}</div>
+  `;
 
-  if ($("checkoutPhone")) {
-    $("checkoutPhone").value = currentUser.phone || "";
-  }
+  $("checkoutName").value = currentUser.name || "";
+  $("checkoutPhone").value = currentUser.phone || "";
+  $("checkoutAddress").value = currentUser.address || "";
 
-  if ($("checkoutAddress")) {
-    $("checkoutAddress").value = currentUser.address || "";
-  }
-
-  $("checkoutModal")?.classList.remove("hidden");
+  $("checkoutModal").classList.remove("hidden");
 }
 
-on("checkoutForm", "submit", event => {
+function placeOrder(event) {
   event.preventDefault();
 
-  if (!currentUser || !pendingPurchase?.length) return;
-
-  const name = $("checkoutName")?.value.trim() || "";
-  const phone = $("checkoutPhone")?.value.trim() || "";
-  const address = $("checkoutAddress")?.value.trim() || "";
-
-  if (name.length < 2) {
-    return showToast("Please enter your complete name.");
+  if (!pendingCheckout.length) {
+    showToast("No products selected.");
+    return;
   }
 
-  if (phone.replace(/\D/g, "").length < 7) {
-    return showToast("Please enter a valid contact number.");
+  const name = $("checkoutName").value.trim();
+  const phone = $("checkoutPhone").value.trim();
+  const address = $("checkoutAddress").value.trim();
+
+  if (!name || !phone || !address) {
+    showToast("Please complete all delivery details.");
+    return;
   }
 
-  if (address.length < 8) {
-    return showToast("Please enter your complete delivery address.");
-  }
+  const orderItems = [];
+  let total = 0;
 
-  // Validate everything before changing stock.
-  for (const item of pendingPurchase) {
-    const product = findProduct(item.productId);
+  for (const item of pendingCheckout) {
+    const product = getProduct(item.productId);
 
-    if (
-      !product ||
-      !Number.isInteger(item.quantity) ||
-      item.quantity < 1 ||
-      product.stock < item.quantity
-    ) {
-      return showToast(
-        "An item does not have enough stock. Please review your order."
-      );
+    if (!product || !Number.isInteger(Number(item.quantity)) ||
+        item.quantity < 1 || product.stock < item.quantity) {
+      showToast("A product is unavailable or has insufficient stock.");
+      return;
     }
-  }
 
-  const orderItems = pendingPurchase.map(item => {
-    const product = findProduct(item.productId);
+    const subtotal = product.price * item.quantity;
 
-    return {
+    orderItems.push({
       productId: product.id,
       name: product.name,
-      price: Number(product.price),
-      quantity: Number(item.quantity),
-      subtotal: Number(product.price) * Number(item.quantity)
-    };
-  });
+      price: product.price,
+      quantity: item.quantity,
+      subtotal
+    });
 
-  const total = orderItems.reduce((sum, item) =>
-    sum + item.subtotal, 0
-  );
+    total += subtotal;
+  }
+
+  // Deduct stock only after all products have passed validation.
+  orderItems.forEach(item => {
+    const product = getProduct(item.productId);
+    product.stock -= item.quantity;
+  });
 
   const order = {
     id: makeId("ORD"),
-    receiptNo: "PV-" + Date.now(),
     userId: currentUser.id,
     customerName: name,
     username: currentUser.username,
@@ -1255,446 +879,163 @@ on("checkoutForm", "submit", event => {
     address,
     items: orderItems,
     total,
-    paymentMethod: "Cash on Delivery (COD)",
+    paymentMethod: "Cash on Delivery",
     paymentStatus: "Pending",
     status: "Pending",
     createdAt: new Date().toISOString()
   };
 
-  const oldProducts = JSON.stringify(products);
-  const oldOrders = JSON.stringify(orders);
-  const oldCarts = JSON.stringify(carts);
-  const oldUsers = JSON.stringify(users);
-
-  const purchasedIds = new Set(
-    pendingPurchase.map(item => String(item.productId))
-  );
-
-  // Deduct only the purchased quantities.
-  pendingPurchase.forEach(item => {
-    findProduct(item.productId).stock -= item.quantity;
-  });
-
-  // Remove only purchased products from the cart.
-  // Unselected products remain untouched.
-  if (checkoutSource === "cart") {
-    const remainingCart = getCart().filter(item =>
-      !purchasedIds.has(String(item.productId))
-    );
-
-    carts[currentUser.id] = remainingCart;
-  }
+  orders.push(order);
 
   currentUser.name = name;
   currentUser.phone = phone;
   currentUser.address = address;
 
-  orders.unshift(order);
-
-  const saved =
-    save(STORAGE.products, products) &&
-    save(STORAGE.orders, orders) &&
-    save(STORAGE.users, users) &&
-    save(STORAGE.cart, carts);
-
-  if (!saved) {
-    products = JSON.parse(oldProducts);
-    orders = JSON.parse(oldOrders);
-    carts = JSON.parse(oldCarts);
-    users = JSON.parse(oldUsers);
-
-    currentUser = findUser(currentUser.id);
-
-    persistAll();
-
-    return showToast("Order could not be saved. Please try again.");
+  if (pendingCheckout.length === cart.length &&
+      pendingCheckout.every(item =>
+        cart.some(entry => entry.productId === item.productId &&
+          entry.quantity === item.quantity)
+      )) {
+    cart = [];
+  } else if (pendingCheckout.length === 1) {
+    // Buy Now does not remove an existing cart item.
   }
 
-  // Clear purchased products from selection.
-  purchasedIds.forEach(id => selectedCartProducts.delete(id));
+  updateCartStorage();
+  persistAll();
 
-  pendingPurchase = null;
-  checkoutSource = null;
+  $("checkoutForm").reset();
+  $("checkoutModal").classList.add("hidden");
 
-  $("checkoutForm")?.reset();
-  closeModal("checkoutModal");
-
-  updateCartCount();
-
-  if (currentPage === "cart") renderCart();
-  if (currentPage === "shop") renderShop();
+  pendingCheckout = [];
 
   renderReceipt(order);
-  showToast("Your order has been placed successfully!");
-});
+  $("receiptModal").classList.remove("hidden");
 
-/* -------------------- RECEIPTS -------------------- */
+  showToast("Your order has been placed successfully!");
+}
+
+/* ==================== RECEIPTS ==================== */
 
 function renderReceipt(order) {
-  if (!order || !Array.isArray(order.items)) return;
+  const lines = (order.items || []).map(item => `
+    <div class="receipt-line">
+      <span>
+        ${escapeHTML(item.name)} × ${item.quantity}
+      </span>
+      <strong>${money(item.subtotal)}</strong>
+    </div>
+  `).join("");
 
-  if ($("receiptContent")) {
-    $("receiptContent").innerHTML = `
-      <div class="receipt">
-        <h2>✿ Petal & Vine</h2>
-        <p>Flower Boutique</p>
-        <p class="muted">Order Receipt</p>
+  $("receiptContent").innerHTML = `
+    <div class="receipt">
+      <h2>✿ Petal & Vine</h2>
+      <p>Flower Boutique</p>
+      <hr>
 
-        <hr>
+      <h3>Official Order Receipt</h3>
 
-        <div class="receipt-line">
-          <span>Receipt No.</span>
-          <strong>${escapeHTML(order.receiptNo)}</strong>
-        </div>
-
-        <div class="receipt-line">
-          <span>Order Date</span>
-          <strong>${formatDate(order.createdAt)}</strong>
-        </div>
-
-        <div class="receipt-line">
-          <span>Customer</span>
-          <strong>${escapeHTML(order.customerName)}</strong>
-        </div>
-
-        <div class="receipt-line">
-          <span>Contact</span>
-          <strong>${escapeHTML(order.phone)}</strong>
-        </div>
-
-        <div class="receipt-line">
-          <span>Address</span>
-          <strong>${escapeHTML(order.address)}</strong>
-        </div>
-
-        <h3>Order Items</h3>
-
-        ${order.items.map(item => `
-          <div class="receipt-line">
-            <span>
-              ${escapeHTML(item.name)} × ${Number(item.quantity)}
-              <br>
-              <small>${money(item.price)} each</small>
-            </span>
-
-            <strong>${money(item.subtotal)}</strong>
-          </div>
-        `).join("")}
-
-        <div class="receipt-total">
-          Total: ${money(order.total)}
-        </div>
-
-        <div class="receipt-line">
-          <span>Payment Method</span>
-          <strong>${escapeHTML(order.paymentMethod || "Cash on Delivery")}</strong>
-        </div>
-
-        <div class="receipt-line">
-          <span>Payment Status</span>
-          <strong>${escapeHTML(order.paymentStatus || "Pending")}</strong>
-        </div>
-
-        <div class="receipt-line">
-          <span>Order Status</span>
-          <strong>${escapeHTML(order.status || "Pending")}</strong>
-        </div>
-
-        <p>Thank you for shopping with Petal & Vine!</p>
-        <p class="muted">Please keep this receipt for your records.</p>
+      <div class="receipt-line">
+        <span>Order Number</span>
+        <strong>${escapeHTML(order.id)}</strong>
       </div>
 
-      <div class="receipt-actions no-print">
-        <button type="button" class="btn primary" onclick="printReceipt()">
-          Print Receipt
-        </button>
-      </div>
-    `;
-  }
-
-  $("receiptModal")?.classList.remove("hidden");
-}
-
-function printReceipt() {
-  const receipt = $("receiptContent")?.querySelector(".receipt");
-
-  if (!receipt) {
-    return showToast("No receipt is available to print.");
-  }
-
-  const printWindow = window.open("", "_blank", "width=800,height=700");
-
-  if (!printWindow) {
-    return showToast("Please allow pop-ups to print your receipt.");
-  }
-
-  printWindow.document.write(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Petal & Vine Receipt</title>
-      <meta charset="UTF-8">
-      <style>
-        body {
-          font-family: Arial, sans-serif;
-          padding: 25px;
-          color: #333;
-          max-width: 700px;
-          margin: auto;
-        }
-
-        h2, h3, p { text-align: center; }
-
-        .receipt-line {
-          display: flex;
-          justify-content: space-between;
-          gap: 20px;
-          padding: 9px 0;
-          border-bottom: 1px solid #eee;
-        }
-
-        .receipt-total {
-          text-align: right;
-          font-size: 20px;
-          font-weight: bold;
-          margin-top: 20px;
-        }
-
-        .muted { color: #777; }
-
-        hr {
-          border: 0;
-          border-top: 1px solid #ddd;
-        }
-
-        @media print {
-          body { padding: 0; }
-        }
-      </style>
-    </head>
-    <body>
-      ${receipt.innerHTML}
-      <script>
-        window.onload = function() {
-          window.print();
-        };
-      <\/script>
-    </body>
-    </html>
-  `);
-
-  printWindow.document.close();
-}
-
-function viewReceipt(orderId) {
-  if (!currentUser) return;
-
-  const order = orders.find(item =>
-    String(item.id) === String(orderId)
-  );
-
-  if (!order) return showToast("Receipt not found.");
-
-  if (!isAdmin() && order.userId !== currentUser.id) {
-    return showToast("You cannot view this receipt.");
-  }
-
-  renderReceipt(order);
-}
-
-/* -------------------- CUSTOMER ORDERS -------------------- */
-
-function renderCustomerOrders() {
-  const container = $("customerOrders");
-  if (!container || !currentUser) return;
-
-  const myOrders = orders.filter(order =>
-    order.userId === currentUser.id
-  );
-
-  if (!myOrders.length) {
-    container.innerHTML = emptyState(
-      "No orders yet",
-      "Your placed orders will appear here."
-    );
-    return;
-  }
-
-  container.innerHTML = myOrders.map(order => `
-    <div class="panel" style="margin-bottom:15px">
-      <div class="section-heading">
-        <div>
-          <h3>${escapeHTML(order.receiptNo)}</h3>
-          <p class="muted">${formatDate(order.createdAt)}</p>
-        </div>
-
-        <span class="badge ${getOrderStatusClass(order.status)}">
-          ${escapeHTML(order.status || "Pending")}
-        </span>
+      <div class="receipt-line">
+        <span>Date</span>
+        <strong>${new Date(order.createdAt).toLocaleString()}</strong>
       </div>
 
-      ${order.items.map(item => `
-        <div class="receipt-line">
-          <span>
-            ${escapeHTML(item.name)} × ${Number(item.quantity)}
-          </span>
-          <strong>${money(item.subtotal)}</strong>
-        </div>
-      `).join("")}
+      <div class="receipt-line">
+        <span>Customer</span>
+        <strong>${escapeHTML(order.customerName)}</strong>
+      </div>
+
+      <div class="receipt-line">
+        <span>Contact</span>
+        <strong>${escapeHTML(order.phone)}</strong>
+      </div>
+
+      <div class="receipt-line">
+        <span>Address</span>
+        <strong>${escapeHTML(order.address)}</strong>
+      </div>
+
+      <h3>Order Items</h3>
+
+      ${lines}
 
       <div class="receipt-total">
         Total: ${money(order.total)}
       </div>
 
-      <p class="muted">
-        Payment: ${escapeHTML(order.paymentMethod || "COD")}
-        · ${escapeHTML(order.paymentStatus || "Pending")}
-      </p>
-
-      <button
-        class="btn outline small"
-        onclick="viewReceipt('${escapeHTML(order.id)}')"
-      >
-        View Receipt
-      </button>
-    </div>
-  `).join("");
-}
-
-/* -------------------- CUSTOMER RECEIPTS -------------------- */
-
-function renderCustomerReceipts() {
-  const container = $("customerReceipts");
-  if (!container || !currentUser) return;
-
-  const myOrders = orders.filter(order =>
-    order.userId === currentUser.id
-  );
-
-  if (!myOrders.length) {
-    container.innerHTML = emptyState(
-      "No receipts available",
-      "Your receipts will appear after placing an order."
-    );
-    return;
-  }
-
-  container.innerHTML = myOrders.map(order => `
-    <div class="panel" style="margin-bottom:12px">
-      <div class="section-heading">
-        <div>
-          <h3>${escapeHTML(order.receiptNo)}</h3>
-          <p class="muted">${formatDate(order.createdAt)}</p>
-        </div>
-
-        <span class="badge ${getOrderStatusClass(order.status)}">
-          ${escapeHTML(order.status || "Pending")}
-        </span>
+      <div class="receipt-line">
+        <span>Payment</span>
+        <strong>Cash on Delivery</strong>
       </div>
 
-      <p>Total: <strong>${money(order.total)}</strong></p>
-
-      <p class="muted">
-        Payment: ${escapeHTML(order.paymentStatus || "Pending")}
-      </p>
-
-      <div class="product-actions">
-        <button
-          class="btn primary"
-          onclick="viewReceipt('${escapeHTML(order.id)}')"
-        >
-          View / Print Receipt
-        </button>
+      <div class="receipt-line">
+        <span>Order Status</span>
+        <strong>${escapeHTML(order.status)}</strong>
       </div>
+
+      <hr>
+      <p>Thank you for choosing Petal & Vine!</p>
+      <p>Flowers that speak from the heart.</p>
     </div>
-  `).join("");
+  `;
 }
 
-/* -------------------- CUSTOMER TRANSACTIONS -------------------- */
+function viewReceipt(id) {
+  const order = orders.find(item => item.id === id);
+  if (!order) return;
 
-function renderCustomerTransactions() {
-  const container = $("customerTransactions");
-  if (!container || !currentUser) return;
+  if (currentUser.role === "customer" &&
+      order.userId !== currentUser.id) return;
 
-  const myOrders = orders.filter(order =>
-    order.userId === currentUser.id
-  );
+  renderReceipt(order);
+  $("receiptModal").classList.remove("hidden");
+}
 
-  if (!myOrders.length) {
-    container.innerHTML = emptyState(
-      "No transactions yet",
-      "Your transactions will appear here after placing an order."
-    );
+/* ==================== CUSTOMER ORDERS ==================== */
+
+function renderCustomerOrders() {
+  const container = $("customerOrders");
+  const customerOrders = getCustomerOrders().slice().reverse();
+
+  if (!customerOrders.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <strong>No orders yet</strong>
+        Your orders will appear here.
+      </div>
+    `;
     return;
   }
-
-  const totalTransactions = myOrders.length;
-
-  const totalAmount = myOrders.reduce((sum, order) =>
-    sum + Number(order.total || 0), 0
-  );
-
-  const paidAmount = myOrders
-    .filter(order => order.paymentStatus === "Paid")
-    .reduce((sum, order) => sum + Number(order.total || 0), 0);
 
   container.innerHTML = `
-    <div class="stats-grid">
-      <div class="stat-card">
-        <span>Total Transactions</span>
-        <strong>${totalTransactions}</strong>
-      </div>
-
-      <div class="stat-card">
-        <span>Total Order Amount</span>
-        <strong>${money(totalAmount)}</strong>
-      </div>
-
-      <div class="stat-card">
-        <span>Paid Amount</span>
-        <strong>${money(paidAmount)}</strong>
-      </div>
-    </div>
-
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Receipt No.</th>
+            <th>Order ID</th>
             <th>Date</th>
-            <th>Amount</th>
-            <th>Payment Method</th>
-            <th>Payment Status</th>
-            <th>Order Status</th>
+            <th>Total</th>
+            <th>Status</th>
+            <th>Payment</th>
             <th>Receipt</th>
           </tr>
         </thead>
-
         <tbody>
-          ${myOrders.map(order => `
+          ${customerOrders.map(order => `
             <tr>
-              <td>${escapeHTML(order.receiptNo)}</td>
-              <td>${formatDate(order.createdAt)}</td>
+              <td>${escapeHTML(order.id)}</td>
+              <td>${new Date(order.createdAt).toLocaleDateString()}</td>
               <td>${money(order.total)}</td>
-              <td>${escapeHTML(order.paymentMethod || "COD")}</td>
-
+              <td>${statusBadge(order.status)}</td>
+              <td>${escapeHTML(order.paymentStatus)}</td>
               <td>
-                <span class="badge ${getPaymentStatusClass(order.paymentStatus)}">
-                  ${escapeHTML(order.paymentStatus || "Pending")}
-                </span>
-              </td>
-
-              <td>
-                <span class="badge ${getOrderStatusClass(order.status)}">
-                  ${escapeHTML(order.status || "Pending")}
-                </span>
-              </td>
-
-              <td>
-                <button
-                  class="btn outline small"
-                  onclick="viewReceipt('${escapeHTML(order.id)}')"
-                >
+                <button class="btn outline small"
+                  onclick="viewReceipt('${order.id}')">
                   View
                 </button>
               </td>
@@ -1706,24 +1047,106 @@ function renderCustomerTransactions() {
   `;
 }
 
-/* -------------------- CUSTOMER PROFILE -------------------- */
+function renderCustomerReceipts() {
+  const container = $("customerReceipts");
+  const customerOrders = getCustomerOrders().slice().reverse();
+
+  if (!customerOrders.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <strong>No receipts available</strong>
+        Your receipts will appear after placing an order.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Receipt / Order ID</th>
+            <th>Date</th>
+            <th>Amount</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${customerOrders.map(order => `
+            <tr>
+              <td>${escapeHTML(order.id)}</td>
+              <td>${new Date(order.createdAt).toLocaleDateString()}</td>
+              <td>${money(order.total)}</td>
+              <td>
+                <button class="btn primary small"
+                  onclick="viewReceipt('${order.id}')">
+                  View Receipt
+                </button>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderTransactions() {
+  const container = $("customerTransactions");
+  const customerOrders = getCustomerOrders().slice().reverse();
+
+  if (!customerOrders.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <strong>No transactions yet</strong>
+        Your payment records will appear here.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Transaction</th>
+            <th>Date</th>
+            <th>Payment Method</th>
+            <th>Amount</th>
+            <th>Payment Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${customerOrders.map(order => `
+            <tr>
+              <td>${escapeHTML(order.id)}</td>
+              <td>${new Date(order.createdAt).toLocaleDateString()}</td>
+              <td>Cash on Delivery</td>
+              <td>${money(order.total)}</td>
+              <td>${statusBadge(order.paymentStatus)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/* ==================== CUSTOMER PROFILE ==================== */
 
 function renderProfile() {
-  if (!currentUser) return;
-
-  if ($("profileName")) $("profileName").value = currentUser.name || "";
-  if ($("profileUsername")) $("profileUsername").value = currentUser.username || "";
-  if ($("profilePhone")) $("profilePhone").value = currentUser.phone || "";
-  if ($("profileAddress")) $("profileAddress").value = currentUser.address || "";
-  if ($("profilePassword")) $("profilePassword").value = "";
-
+  $("profileName").value = currentUser.name || "";
+  $("profileUsername").value = currentUser.username || "";
+  $("profilePhone").value = currentUser.phone || "";
+  $("profileAddress").value = currentUser.address || "";
+  $("profilePassword").value = "";
   setMessage("profileMessage", "");
 }
 
-on("profileForm", "submit", event => {
+function saveProfile(event) {
   event.preventDefault();
-
-  if (!currentUser || isAdmin()) return;
 
   const name = $("profileName").value.trim();
   const username = $("profileUsername").value.trim();
@@ -1731,28 +1154,29 @@ on("profileForm", "submit", event => {
   const address = $("profileAddress").value.trim();
   const password = $("profilePassword").value;
 
-  if (name.length < 2 || username.length < 3) {
-    return setMessage("profileMessage", "Please enter a valid name and username.");
+  if (name.length < 2) {
+    return setMessage("profileMessage", "Enter a valid full name.");
   }
 
-  if (!/^[a-zA-Z0-9_.-]+$/.test(username)) {
-    return setMessage("profileMessage", "Username contains invalid characters.");
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+    return setMessage("profileMessage", "Invalid username.");
   }
 
-  const duplicate = users.some(user =>
+  const duplicate = users.find(user =>
     user.id !== currentUser.id &&
     user.username.toLowerCase() === username.toLowerCase()
   );
 
   if (duplicate) {
-    return setMessage("profileMessage", "That username is already in use.");
+    return setMessage("profileMessage", "Username is already taken.");
   }
 
   if (password && password.length < 6) {
-    return setMessage("profileMessage", "New password must have at least 6 characters.");
+    return setMessage(
+      "profileMessage",
+      "New password must contain at least 6 characters."
+    );
   }
-
-  const oldUser = { ...currentUser };
 
   currentUser.name = name;
   currentUser.username = username;
@@ -1761,111 +1185,91 @@ on("profileForm", "submit", event => {
 
   if (password) currentUser.password = password;
 
-  if (!save(STORAGE.users, users)) {
-    Object.assign(currentUser, oldUser);
-    return;
-  }
+  persistAll();
 
-  if ($("welcomeText")) {
-    $("welcomeText").textContent = `Welcome, ${currentUser.name}!`;
-  }
-
-  if ($("headerUser")) {
-    $("headerUser").textContent =
-      `${currentUser.name} · ${currentUser.role}`;
-  }
-
-  $("profilePassword").value = "";
+  $("headerUser").textContent = "Welcome, " + currentUser.name;
+  $("welcomeText").textContent = "Welcome, " + currentUser.name + "!";
 
   setMessage("profileMessage", "Profile updated successfully.", true);
-  showToast("Profile updated.");
-});
-
-/* -------------------- ADMIN DASHBOARD -------------------- */
-
-function renderDashboard() {
-  if (!isAdmin()) return;
-
-  const revenue = orders
-    .filter(order => order.status !== "Cancelled")
-    .reduce((sum, order) => sum + Number(order.total || 0), 0);
-
-  const completed = orders.filter(order =>
-    order.status === "Completed"
-  ).length;
-
-  const pending = orders.filter(order =>
-    order.status === "Pending"
-  ).length;
-
-  const customers = users.filter(user =>
-    user.role === "customer"
-  ).length;
-
-  if ($("dashboardStats")) {
-    $("dashboardStats").innerHTML = `
-      <div class="stat-card">
-        <span>Total Products</span>
-        <strong>${products.length}</strong>
-      </div>
-
-      <div class="stat-card">
-        <span>Total Orders</span>
-        <strong>${orders.length}</strong>
-      </div>
-
-      <div class="stat-card">
-        <span>Customers</span>
-        <strong>${customers}</strong>
-      </div>
-
-      <div class="stat-card">
-        <span>Order Revenue</span>
-        <strong>${money(revenue)}</strong>
-      </div>
-
-      <div class="stat-card">
-        <span>Completed Orders</span>
-        <strong>${completed}</strong>
-      </div>
-
-      <div class="stat-card">
-        <span>Pending Orders</span>
-        <strong>${pending}</strong>
-      </div>
-    `;
-  }
-
-  const recent = orders.slice(0, 5);
-
-  if ($("recentOrders")) {
-    $("recentOrders").innerHTML = recent.length
-      ? recent.map(order => `
-          <div class="receipt-line">
-            <span>
-              <strong>${escapeHTML(order.receiptNo)}</strong>
-              <br>
-              <small>${escapeHTML(order.customerName)}</small>
-            </span>
-
-            <span>
-              ${money(order.total)}
-              <br>
-              <small>${escapeHTML(order.status)}</small>
-            </span>
-          </div>
-        `).join("")
-      : emptyState("No orders yet", "New orders will appear here.");
-  }
 }
 
-/* -------------------- ADMIN PRODUCTS -------------------- */
+/* ==================== ADMIN DASHBOARD ==================== */
+
+function renderDashboard() {
+  const revenue = orders
+    .filter(order => order.status !== "Cancelled")
+    .reduce((sum, order) => sum + Number(order.total), 0);
+
+  const pending = orders.filter(order => order.status === "Pending").length;
+  const customerCount = users.filter(user => user.role === "customer").length;
+
+  $("dashboardStats").innerHTML = `
+    <div class="stat-card">
+      <span>Total Products</span>
+      <strong>${products.length}</strong>
+    </div>
+
+    <div class="stat-card">
+      <span>Total Orders</span>
+      <strong>${orders.length}</strong>
+    </div>
+
+    <div class="stat-card">
+      <span>Total Customers</span>
+      <strong>${customerCount}</strong>
+    </div>
+
+    <div class="stat-card">
+      <span>Pending Orders</span>
+      <strong>${pending}</strong>
+    </div>
+
+    <div class="stat-card">
+      <span>Total Sales</span>
+      <strong>${money(revenue)}</strong>
+    </div>
+
+    <div class="stat-card">
+      <span>Low Stock Products</span>
+      <strong>${products.filter(product => product.stock <= 5).length}</strong>
+    </div>
+  `;
+
+  const recent = orders.slice().reverse().slice(0, 5);
+
+  $("recentOrders").innerHTML = recent.length
+    ? `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Order ID</th>
+              <th>Customer</th>
+              <th>Total</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${recent.map(order => `
+              <tr>
+                <td>${escapeHTML(order.id)}</td>
+                <td>${escapeHTML(order.customerName)}</td>
+                <td>${money(order.total)}</td>
+                <td>${statusBadge(order.status)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No orders received yet.</div>`;
+}
+
+/* ==================== ADMIN PRODUCTS ==================== */
 
 function renderAdminProducts() {
   const container = $("adminProducts");
-  if (!container) return;
-
-  const search = $("adminProductSearch")?.value.trim().toLowerCase() || "";
+  const search = $("adminProductSearch").value.trim().toLowerCase();
 
   const filtered = products.filter(product =>
     product.name.toLowerCase().includes(search) ||
@@ -1873,39 +1277,33 @@ function renderAdminProducts() {
   );
 
   if (!filtered.length) {
-    container.innerHTML = emptyState(
-      "No products found",
-      "Add a product or change your search."
-    );
+    container.innerHTML = `
+      <div class="empty-state">
+        <strong>No products found</strong>
+      </div>
+    `;
     return;
   }
 
   container.innerHTML = filtered.map(product => `
     <article class="product-card">
-      ${getImageMarkup(product)}
+      ${imageHTML(product.image)}
 
       <div class="product-info">
         <h3>${escapeHTML(product.name)}</h3>
         <p>${escapeHTML(product.category)}</p>
-        <p>${escapeHTML(product.description || "")}</p>
-
+        <p>${escapeHTML(product.description)}</p>
         <div class="price">${money(product.price)}</div>
         <div class="stock">Stock: ${product.stock}</div>
 
         <div class="product-actions">
-          <button
-            class="btn outline"
-            type="button"
-            onclick="editProduct('${escapeHTML(product.id)}')"
-          >
+          <button class="btn outline"
+            onclick="editProduct('${product.id}')">
             Edit
           </button>
 
-          <button
-            class="btn danger"
-            type="button"
-            onclick="deleteProduct('${escapeHTML(product.id)}')"
-          >
+          <button class="btn danger"
+            onclick="deleteProduct('${product.id}')">
             Delete
           </button>
         </div>
@@ -1914,119 +1312,46 @@ function renderAdminProducts() {
   `).join("");
 }
 
-on("adminProductSearch", "input", renderAdminProducts);
-
 function openProductModal() {
-  if (!isAdmin()) return;
-
-  $("productForm")?.reset();
-
-  if ($("productId")) $("productId").value = "";
-  if ($("productModalTitle")) {
-    $("productModalTitle").textContent = "Add Product";
-  }
-
-  if ($("productImage")) $("productImage").value = "💐";
-  if ($("productImageFile")) $("productImageFile").value = "";
-
+  $("productForm").reset();
+  $("productId").value = "";
+  $("productModalTitle").textContent = "Add Product";
+  $("productImagePreview").textContent = "💐";
   selectedImage = "";
 
-  if ($("productImagePreview")) {
-    $("productImagePreview").textContent = "💐";
-  }
-
-  $("productModal")?.classList.remove("hidden");
+  $("productModal").classList.remove("hidden");
 }
 
-function editProduct(productId) {
-  if (!isAdmin()) return;
-
-  const product = findProduct(productId);
-
-  if (!product) {
-    return showToast("Product not found. Refresh the product list.");
-  }
-
-  if (!$("productForm")) {
-    return showToast("Product form is missing from your HTML.");
-  }
+function editProduct(id) {
+  const product = getProduct(id);
+  if (!product) return;
 
   $("productId").value = product.id;
   $("productName").value = product.name;
   $("productCategory").value = product.category;
-  $("productDescription").value = product.description || "";
+  $("productDescription").value = product.description;
   $("productPrice").value = product.price;
   $("productStock").value = product.stock;
-  $("productImage").value = product.image || "💐";
-  $("productImageFile").value = "";
+  $("productImage").value =
+    product.image.startsWith("data:image/") ? "" : product.image;
 
-  selectedImage = product.image || "💐";
+  selectedImage = product.image;
 
   $("productModalTitle").textContent = "Edit Product";
 
-  showProductPreview(selectedImage);
-
-  $("productModal")?.classList.remove("hidden");
-}
-
-function showProductPreview(value) {
-  const preview = $("productImagePreview");
-  if (!preview) return;
-
-  if (/^(https?:\/\/|data:image\/)/i.test(value || "")) {
-    preview.innerHTML = `
-      <img
-        src="${escapeHTML(value)}"
-        alt="Product preview"
-        onerror="this.parentElement.textContent='Image unavailable'"
-      >
-    `;
+  if (/^https?:\/\//i.test(product.image) ||
+      product.image.startsWith("data:image/")) {
+    $("productImagePreview").innerHTML =
+      `<img src="${escapeHTML(product.image)}" alt="Product preview">`;
   } else {
-    preview.textContent = value || "💐";
+    $("productImagePreview").textContent = product.image;
   }
+
+  $("productModal").classList.remove("hidden");
 }
 
-on("productImage", "input", () => {
-  selectedImage = $("productImage").value.trim() || "💐";
-  showProductPreview(selectedImage);
-});
-
-on("productImageFile", "change", event => {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  if (!file.type.startsWith("image/")) {
-    showToast("Please select an image file.");
-    event.target.value = "";
-    return;
-  }
-
-  if (file.size > 1.5 * 1024 * 1024) {
-    showToast("Image must be 1.5 MB or smaller.");
-    event.target.value = "";
-    return;
-  }
-
-  const reader = new FileReader();
-
-  reader.onload = () => {
-    selectedImage = reader.result;
-    showProductPreview(selectedImage);
-  };
-
-  reader.onerror = () => {
-    showToast("Could not read the selected image.");
-  };
-
-  reader.readAsDataURL(file);
-});
-
-/* -------------------- ADD / EDIT PRODUCT -------------------- */
-
-on("productForm", "submit", event => {
+function saveProduct(event) {
   event.preventDefault();
-
-  if (!isAdmin()) return;
 
   const id = $("productId").value;
   const name = $("productName").value.trim();
@@ -2034,33 +1359,17 @@ on("productForm", "submit", event => {
   const description = $("productDescription").value.trim();
   const price = Number($("productPrice").value);
   const stock = Number($("productStock").value);
+  const image = selectedImage || $("productImage").value.trim() || "💐";
 
-  const image =
-    selectedImage ||
-    $("productImage").value.trim() ||
-    "💐";
-
-  if (!name || !category) {
-    return showToast("Enter the product name and category.");
+  if (!name || !category || !Number.isFinite(price) ||
+      price <= 0 || !Number.isInteger(stock) || stock < 0) {
+    showToast("Please enter valid product information.");
+    return;
   }
-
-  if (!Number.isFinite(price) || price <= 0) {
-    return showToast("Enter a valid product price.");
-  }
-
-  if (!Number.isInteger(stock) || stock < 0) {
-    return showToast("Stock must be 0 or a positive whole number.");
-  }
-
-  const oldProducts = JSON.stringify(products);
-  const oldCarts = JSON.stringify(carts);
 
   if (id) {
-    const product = findProduct(id);
-
-    if (!product) {
-      return showToast("Product not found.");
-    }
+    const product = getProduct(id);
+    if (!product) return;
 
     product.name = name;
     product.category = category;
@@ -2069,21 +1378,19 @@ on("productForm", "submit", event => {
     product.stock = stock;
     product.image = image;
 
-    // Remove cart quantities that exceed the new stock.
+    // Remove cart quantities that exceed the updated stock.
     Object.keys(carts).forEach(userId => {
-      carts[userId] = (carts[userId] || []).map(item => {
-        if (String(item.productId) !== String(id)) return item;
-
-        return {
-          ...item,
-          quantity: Math.min(Number(item.quantity), stock)
-        };
-      }).filter(item => item.quantity > 0);
+      carts[userId] = (carts[userId] || []).filter(item => {
+        if (item.productId !== id) return true;
+        item.quantity = Math.min(item.quantity, stock);
+        return item.quantity > 0;
+      });
     });
 
+    showToast("Product updated successfully.");
   } else {
     products.push({
-      id: makeId("PRD"),
+      id: makeId("PROD"),
       name,
       category,
       description,
@@ -2091,99 +1398,74 @@ on("productForm", "submit", event => {
       stock,
       image
     });
+
+    showToast("New product added successfully.");
   }
 
-  const saved =
-    save(STORAGE.products, products) &&
-    save(STORAGE.cart, carts);
+  persistAll();
+  $("productModal").classList.add("hidden");
+  renderAdminProducts();
+}
 
-  if (!saved) {
-    products = JSON.parse(oldProducts);
-    carts = JSON.parse(oldCarts);
-    persistAll();
-    return;
-  }
+function deleteProduct(id) {
+  const product = getProduct(id);
+  if (!product) return;
 
-  closeModal("productModal");
+  if (!confirm(`Delete "${product.name}"?`)) return;
 
-  refreshProductViews();
+  products = products.filter(item => item.id !== id);
 
-  showToast(
-    id
-      ? "Flower updated successfully!"
-      : "New flower added successfully!"
-  );
-});
-
-/* -------------------- DELETE PRODUCT -------------------- */
-
-function deleteProduct(productId) {
-  if (!isAdmin()) return;
-
-  const product = findProduct(productId);
-
-  if (!product) {
-    return showToast("Product not found.");
-  }
-
-  if (!confirm(`Are you sure you want to delete "${product.name}"?`)) {
-    return;
-  }
-
-  const oldProducts = JSON.stringify(products);
-  const oldCarts = JSON.stringify(carts);
-
-  products = products.filter(item =>
-    String(item.id) !== String(productId)
-  );
-
-  // Remove the deleted flower from every customer's cart.
   Object.keys(carts).forEach(userId => {
-    carts[userId] = (carts[userId] || []).filter(item =>
-      String(item.productId) !== String(productId)
+    carts[userId] = (carts[userId] || []).filter(
+      item => item.productId !== id
     );
   });
 
-  selectedCartProducts.delete(String(productId));
+  if (currentUser) cart = getCart();
 
-  const saved =
-    save(STORAGE.products, products) &&
-    save(STORAGE.cart, carts);
+  persistAll();
+  renderAdminProducts();
+  showToast("Product deleted.");
+}
 
-  if (!saved) {
-    products = JSON.parse(oldProducts);
-    carts = JSON.parse(oldCarts);
-    persistAll();
+/* ==================== IMAGE UPLOAD ==================== */
+
+function uploadProductImage(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    showToast("Please select an image file.");
     return;
   }
 
-  refreshProductViews();
+  if (file.size > 1024 * 1024) {
+    showToast("Image must be 1 MB or smaller.");
+    event.target.value = "";
+    return;
+  }
 
-  showToast(`${product.name} deleted successfully!`);
+  const reader = new FileReader();
+
+  reader.onload = () => {
+    selectedImage = reader.result;
+    $("productImage").value = "";
+    $("productImagePreview").innerHTML =
+      `<img src="${reader.result}" alt="Product preview">`;
+  };
+
+  reader.onerror = () => showToast("Could not read the image.");
+
+  reader.readAsDataURL(file);
 }
 
-/* -------------------- REFRESH PRODUCT VIEWS -------------------- */
-
-function refreshProductViews() {
-  renderAdminProducts();
-  renderInventory();
-  renderDashboard();
-  renderShop();
-  renderCart();
-  updateCartCount();
-}
-
-/* -------------------- ADMIN INVENTORY -------------------- */
+/* ==================== INVENTORY ==================== */
 
 function renderInventory() {
   const container = $("inventoryList");
-  if (!container) return;
 
   if (!products.length) {
-    container.innerHTML = emptyState(
-      "No inventory",
-      "Add products to start managing stock."
-    );
+    container.innerHTML = `<div class="empty-state">No products available.</div>`;
     return;
   }
 
@@ -2197,10 +1479,8 @@ function renderInventory() {
             <th>Price</th>
             <th>Stock</th>
             <th>Availability</th>
-            <th>Action</th>
           </tr>
         </thead>
-
         <tbody>
           ${products.map(product => `
             <tr>
@@ -2208,39 +1488,12 @@ function renderInventory() {
               <td>${escapeHTML(product.category)}</td>
               <td>${money(product.price)}</td>
               <td>${product.stock}</td>
-
               <td>
-                <span class="badge ${
-                  product.stock === 0
-                    ? "red"
-                    : product.stock <= 5
-                      ? ""
-                      : "green"
-                }">
-                  ${
-                    product.stock === 0
-                      ? "Out of Stock"
-                      : product.stock <= 5
-                        ? "Low Stock"
-                        : "Available"
-                  }
-                </span>
-              </td>
-
-              <td>
-                <button
-                  class="btn outline small"
-                  onclick="editProduct('${escapeHTML(product.id)}')"
-                >
-                  Edit
-                </button>
-
-                <button
-                  class="btn danger small"
-                  onclick="deleteProduct('${escapeHTML(product.id)}')"
-                >
-                  Delete
-                </button>
+                ${product.stock <= 0
+                  ? '<span class="badge red">Out of Stock</span>'
+                  : product.stock <= 5
+                    ? '<span class="badge">Low Stock</span>'
+                    : '<span class="badge green">Available</span>'}
               </td>
             </tr>
           `).join("")}
@@ -2250,193 +1503,32 @@ function renderInventory() {
   `;
 }
 
-/* -------------------- ADMIN ORDERS -------------------- */
+/* ==================== ADMIN ORDERS ==================== */
+
+function statusBadge(status) {
+  const value = String(status || "Pending");
+
+  let color = "";
+
+  if (["Completed", "Delivered", "Paid"].includes(value)) {
+    color = "green";
+  } else if (["Cancelled", "Rejected"].includes(value)) {
+    color = "red";
+  }
+
+  return `<span class="badge ${color}">${escapeHTML(value)}</span>`;
+}
 
 function renderAdminOrders() {
   const container = $("adminOrders");
-  if (!container) return;
 
   if (!orders.length) {
-    container.innerHTML = emptyState(
-      "No customer orders",
-      "Orders placed by customers will appear here."
-    );
-    return;
-  }
-
-  container.innerHTML = orders.map(order => `
-    <div class="panel" style="margin-bottom:15px">
-      <div class="section-heading">
-        <div>
-          <h3>${escapeHTML(order.receiptNo)}</h3>
-          <p class="muted">${formatDate(order.createdAt)}</p>
-        </div>
-
-        <strong>${money(order.total)}</strong>
+    container.innerHTML = `
+      <div class="empty-state">
+        <strong>No customer orders</strong>
+        New orders will appear here.
       </div>
-
-      <p>
-        <strong>Customer:</strong>
-        ${escapeHTML(order.customerName)}
-      </p>
-
-      <p>
-        <strong>Contact:</strong>
-        ${escapeHTML(order.phone)}
-      </p>
-
-      <p>
-        <strong>Address:</strong>
-        ${escapeHTML(order.address)}
-      </p>
-
-      <p>
-        <strong>Payment:</strong>
-        COD · ${escapeHTML(order.paymentStatus || "Pending")}
-      </p>
-
-      <h4>Items</h4>
-
-      ${order.items.map(item => `
-        <div class="receipt-line">
-          <span>${escapeHTML(item.name)} × ${item.quantity}</span>
-          <strong>${money(item.subtotal)}</strong>
-        </div>
-      `).join("")}
-
-      <div class="receipt-total">${money(order.total)}</div>
-
-      <label for="status-${escapeHTML(order.id)}">Order Status</label>
-
-      <select
-        id="status-${escapeHTML(order.id)}"
-        onchange="updateOrderStatus('${escapeHTML(order.id)}',this.value)"
-        ${order.status === "Cancelled" ? "disabled" : ""}
-      >
-        ${[
-          "Pending",
-          "Processing",
-          "Ready for Delivery",
-          "Completed",
-          "Cancelled"
-        ].map(status => `
-          <option
-            value="${status}"
-            ${order.status === status ? "selected" : ""}
-          >
-            ${status}
-          </option>
-        `).join("")}
-      </select>
-
-      <button
-        class="btn outline small"
-        onclick="viewReceipt('${escapeHTML(order.id)}')"
-      >
-        View Receipt
-      </button>
-    </div>
-  `).join("");
-}
-
-function updateOrderStatus(orderId, newStatus) {
-  if (!isAdmin()) return;
-
-  const allowed = [
-    "Pending",
-    "Processing",
-    "Ready for Delivery",
-    "Completed",
-    "Cancelled"
-  ];
-
-  if (!allowed.includes(newStatus)) return;
-
-  const order = orders.find(item =>
-    String(item.id) === String(orderId)
-  );
-
-  if (!order) return;
-
-  if (order.status === "Cancelled") {
-    showToast("A cancelled order cannot be reopened.");
-    renderAdminOrders();
-    return;
-  }
-
-  if (order.status === "Completed" && newStatus === "Cancelled") {
-    showToast("A completed order cannot be cancelled here.");
-    renderAdminOrders();
-    return;
-  }
-
-  const oldOrders = JSON.stringify(orders);
-  const oldProducts = JSON.stringify(products);
-
-  if (newStatus === "Cancelled") {
-    const restore = confirm(
-      "Cancel this order and return its items to inventory?"
-    );
-
-    if (!restore) {
-      renderAdminOrders();
-      return;
-    }
-
-    order.items.forEach(item => {
-      const product = findProduct(item.productId);
-
-      if (product) {
-        product.stock += Number(item.quantity);
-      }
-    });
-
-    order.paymentStatus = "Cancelled";
-  }
-
-  if (newStatus === "Completed") {
-    order.paymentStatus = "Paid";
-  }
-
-  order.status = newStatus;
-  order.updatedAt = new Date().toISOString();
-
-  const saved =
-    save(STORAGE.orders, orders) &&
-    save(STORAGE.products, products);
-
-  if (!saved) {
-    orders = JSON.parse(oldOrders);
-    products = JSON.parse(oldProducts);
-    persistAll();
-
-    renderAdminOrders();
-
-    return showToast("Could not update the order. Please try again.");
-  }
-
-  renderAdminOrders();
-  renderInventory();
-  renderDashboard();
-
-  showToast("Order status updated.");
-}
-
-/* -------------------- ADMIN CUSTOMER MANAGEMENT -------------------- */
-
-function renderAdminUsers() {
-  const container = $("adminUsers");
-  if (!container) return;
-
-  const customers = users.filter(user =>
-    user.role === "customer"
-  );
-
-  if (!customers.length) {
-    container.innerHTML = emptyState(
-      "No customer accounts",
-      "Registered customers will appear here."
-    );
+    `;
     return;
   }
 
@@ -2445,41 +1537,129 @@ function renderAdminUsers() {
       <table>
         <thead>
           <tr>
+            <th>Order ID</th>
             <th>Customer</th>
-            <th>Username</th>
             <th>Contact</th>
+            <th>Total</th>
+            <th>Status</th>
+            <th>Update Status</th>
+            <th>Receipt</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${orders.slice().reverse().map(order => `
+            <tr>
+              <td>${escapeHTML(order.id)}</td>
+              <td>${escapeHTML(order.customerName)}</td>
+              <td>${escapeHTML(order.phone)}</td>
+              <td>${money(order.total)}</td>
+              <td>${statusBadge(order.status)}</td>
+              <td>
+                <select onchange="updateOrderStatus('${order.id}',this.value)">
+                  ${["Pending", "Processing", "Ready for Delivery",
+                    "Delivered", "Cancelled"].map(status => `
+                    <option value="${status}"
+                      ${order.status === status ? "selected" : ""}>
+                      ${status}
+                    </option>
+                  `).join("")}
+                </select>
+              </td>
+              <td>
+                <button class="btn outline small"
+                  onclick="viewReceipt('${order.id}')">
+                  View
+                </button>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function updateOrderStatus(id, newStatus) {
+  const order = orders.find(item => item.id === id);
+  if (!order) return;
+
+  if (order.status === "Cancelled" && newStatus !== "Cancelled") {
+    showToast("Cancelled orders cannot be reopened.");
+    renderAdminOrders();
+    return;
+  }
+
+  if (order.status !== "Cancelled" && newStatus === "Cancelled") {
+    if (!confirm("Cancel this order and restore its stock?")) {
+      renderAdminOrders();
+      return;
+    }
+
+    (order.items || []).forEach(item => {
+      const product = getProduct(item.productId);
+      if (product) product.stock += item.quantity;
+    });
+
+    order.paymentStatus = "Cancelled";
+  }
+
+  if (newStatus === "Delivered") {
+    order.paymentStatus = "Paid";
+  }
+
+  order.status = newStatus;
+  persistAll();
+
+  renderAdminOrders();
+  showToast("Order status updated.");
+}
+
+/* ==================== ADMIN CUSTOMERS ==================== */
+
+function renderAdminUsers() {
+  const container = $("adminUsers");
+  const customers = users.filter(user => user.role === "customer");
+
+  if (!customers.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <strong>No registered customers</strong>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Full Name</th>
+            <th>Username</th>
+            <th>Phone</th>
             <th>Account</th>
             <th>Action</th>
           </tr>
         </thead>
-
         <tbody>
           ${customers.map(user => `
             <tr>
               <td>${escapeHTML(user.name)}</td>
               <td>${escapeHTML(user.username)}</td>
-              <td>${escapeHTML(user.phone || "Not provided")}</td>
-
+              <td>${escapeHTML(user.phone || "—")}</td>
               <td>
-                <span class="badge ${
-                  user.active === false ? "red" : "green"
-                }">
-                  ${user.active === false ? "Disabled" : "Active"}
-                </span>
+                ${user.active === false
+                  ? '<span class="badge red">Disabled</span>'
+                  : '<span class="badge green">Active</span>'}
               </td>
-
               <td>
-                <button
-                  class="btn outline small"
-                  onclick="toggleCustomer('${escapeHTML(user.id)}')"
-                >
+                <button class="btn outline small"
+                  onclick="toggleCustomer('${user.id}')">
                   ${user.active === false ? "Enable" : "Disable"}
                 </button>
 
-                <button
-                  class="btn danger small"
-                  onclick="deleteCustomer('${escapeHTML(user.id)}')"
-                >
+                <button class="btn danger small"
+                  onclick="deleteCustomer('${user.id}')">
                   Delete
                 </button>
               </td>
@@ -2491,145 +1671,95 @@ function renderAdminUsers() {
   `;
 }
 
-function toggleCustomer(userId) {
-  if (!isAdmin()) return;
-
-  const user = findUser(userId);
+function toggleCustomer(id) {
+  const user = getUser(id);
   if (!user || user.role !== "customer") return;
 
-  const oldActive = user.active;
   user.active = user.active === false;
-
-  if (!save(STORAGE.users, users)) {
-    user.active = oldActive;
-    return;
-  }
-
+  persistAll();
   renderAdminUsers();
 
-  showToast(
-    user.active
-      ? "Customer account enabled."
-      : "Customer account disabled."
-  );
+  showToast(user.active ? "Customer account enabled." : "Customer account disabled.");
 }
 
-function deleteCustomer(userId) {
-  if (!isAdmin()) return;
-
-  const user = findUser(userId);
+function deleteCustomer(id) {
+  const user = getUser(id);
   if (!user || user.role !== "customer") return;
 
-  if (!confirm(`Delete customer account "${user.username}"?`)) {
-    return;
+  if (!confirm(`Delete customer account "${user.username}"?`)) return;
+
+  users = users.filter(item => item.id !== id);
+  delete carts[id];
+
+  if (session === id) {
+    logout();
   }
 
-  const oldUsers = JSON.stringify(users);
-  const oldCarts = JSON.stringify(carts);
-
-  users = users.filter(item => item.id !== userId);
-  delete carts[userId];
-
-  const saved =
-    save(STORAGE.users, users) &&
-    save(STORAGE.cart, carts);
-
-  if (!saved) {
-    users = JSON.parse(oldUsers);
-    carts = JSON.parse(oldCarts);
-    persistAll();
-    return;
-  }
-
+  persistAll();
   renderAdminUsers();
-  renderDashboard();
-
   showToast("Customer account deleted.");
 }
 
-/* -------------------- ADMIN SETTINGS -------------------- */
+/* ==================== ADMIN SETTINGS ==================== */
 
 function renderSettings() {
-  if (!currentUser || !isAdmin()) return;
-
-  if ($("settingsUsername")) {
-    $("settingsUsername").value = currentUser.username;
-  }
-
-  if ($("settingsPassword")) $("settingsPassword").value = "";
-  if ($("settingsConfirm")) $("settingsConfirm").value = "";
-
+  $("settingsUsername").value = currentUser.username;
+  $("settingsPassword").value = "";
+  $("settingsConfirm").value = "";
   setMessage("settingsMessage", "");
 }
 
-on("settingsForm", "submit", event => {
+function saveSettings(event) {
   event.preventDefault();
-
-  if (!isAdmin()) return;
 
   const username = $("settingsUsername").value.trim();
   const password = $("settingsPassword").value;
   const confirmPassword = $("settingsConfirm").value;
 
-  if (username.length < 3) {
-    return setMessage("settingsMessage", "Username must have at least 3 characters.");
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+    return setMessage("settingsMessage", "Invalid username.");
   }
 
-  if (!/^[a-zA-Z0-9_.-]+$/.test(username)) {
-    return setMessage("settingsMessage", "Username contains invalid characters.");
-  }
-
-  const duplicate = users.some(user =>
+  const duplicate = users.find(user =>
     user.id !== currentUser.id &&
     user.username.toLowerCase() === username.toLowerCase()
   );
 
   if (duplicate) {
-    return setMessage("settingsMessage", "That username is already taken.");
+    return setMessage("settingsMessage", "Username is already taken.");
   }
 
   if (password || confirmPassword) {
     if (password.length < 6) {
-      return setMessage("settingsMessage", "Password must have at least 6 characters.");
+      return setMessage(
+        "settingsMessage",
+        "Password must contain at least 6 characters."
+      );
     }
 
     if (password !== confirmPassword) {
-      return setMessage("settingsMessage", "New passwords do not match.");
+      return setMessage("settingsMessage", "Passwords do not match.");
     }
+
+    currentUser.password = password;
   }
 
-  const oldUser = { ...currentUser };
-
-  if (password) currentUser.password = password;
   currentUser.username = username;
 
-  if (!save(STORAGE.users, users)) {
-    Object.assign(currentUser, oldUser);
-    return;
-  }
-
-  if ($("headerUser")) {
-    $("headerUser").textContent =
-      `${currentUser.name} · ${currentUser.role}`;
-  }
+  persistAll();
 
   setMessage("settingsMessage", "Admin settings updated successfully.", true);
-
-  $("settingsPassword").value = "";
-  $("settingsConfirm").value = "";
-
   showToast("Admin settings saved.");
-});
+}
 
-/* -------------------- MODALS -------------------- */
+/* ==================== MODALS ==================== */
 
-function closeModal(modalId) {
-  const modal = $(modalId);
+function closeModal(id) {
+  const modal = $(id);
   if (modal) modal.classList.add("hidden");
 
-  if (modalId === "checkoutModal") {
-    pendingPurchase = null;
-    checkoutSource = null;
+  if (id === "checkoutModal") {
+    pendingCheckout = [];
   }
 }
 
@@ -2638,35 +1768,44 @@ function closeAllModals() {
     modal.classList.add("hidden");
   });
 
-  pendingPurchase = null;
-  checkoutSource = null;
+  pendingCheckout = [];
 }
 
-document.querySelectorAll(".modal").forEach(modal => {
-  modal.addEventListener("click", event => {
-    if (event.target === modal) {
-      closeModal(modal.id);
+/* ==================== EVENT LISTENERS ==================== */
+
+function initializeEvents() {
+  $("loginForm").addEventListener("submit", login);
+  $("registerForm").addEventListener("submit", register);
+  $("profileForm").addEventListener("submit", saveProfile);
+  $("settingsForm").addEventListener("submit", saveSettings);
+  $("productForm").addEventListener("submit", saveProduct);
+  $("checkoutForm").addEventListener("submit", placeOrder);
+
+  $("productSearch").addEventListener("input", renderShop);
+  $("adminProductSearch").addEventListener("input", renderAdminProducts);
+
+  $("productImage").addEventListener("input", previewProductImage);
+  $("productImageFile").addEventListener("change", uploadProductImage);
+
+  document.querySelectorAll(".modal").forEach(modal => {
+    modal.addEventListener("click", event => {
+      if (event.target === modal) {
+        closeModal(modal.id);
+      }
+    });
+  });
+
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      closeAllModals();
     }
   });
-});
+}
 
-document.addEventListener("keydown", event => {
-  if (event.key === "Escape") {
-    closeAllModals();
-  }
-});
+/* ==================== START APPLICATION ==================== */
 
-/* -------------------- START APPLICATION -------------------- */
-
-function startApplication() {
-  enhancePasswordFields();
-  showLogin();
+document.addEventListener("DOMContentLoaded", () => {
+  initializeEvents();
   restoreSession();
-  updateCartCount();
-}
-
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", startApplication);
-} else {
-  startApplication();
-}
+  showLogin();
+});
