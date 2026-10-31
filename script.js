@@ -1,6 +1,9 @@
+
 /* =====================================================
    PETAL & VINE FLOWER BOUTIQUE
-   Complete Connected JavaScript
+   COMPLETE CONNECTED JAVASCRIPT
+   Customer + Admin + Products + Cart + Checkout
+   Receipts + Printing + Transactions + Password Toggles
    Front-end demonstration using localStorage
 ===================================================== */
 
@@ -18,25 +21,10 @@ const STORAGE = {
 
 const $ = id => document.getElementById(id);
 
-function read(key, fallback) {
-  try {
-    const value = localStorage.getItem(key);
-    return value ? JSON.parse(value) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function save(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch (error) {
-    console.error(error);
-    showToast("Unable to save. Storage may be full.");
-    return false;
-  }
-}
+const on = (id, event, callback) => {
+  const element = $(id);
+  if (element) element.addEventListener(event, callback);
+};
 
 let users = read(STORAGE.users, []);
 let products = read(STORAGE.products, []);
@@ -50,7 +38,38 @@ let checkoutSource = null;
 let selectedImage = "";
 let toastTimer = null;
 
-/* -------------------- HELPERS -------------------- */
+/* -------------------- STORAGE HELPERS -------------------- */
+
+function read(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function save(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (error) {
+    console.error("Storage error:", error);
+    showToast("Unable to save. Browser storage may be full.");
+    return false;
+  }
+}
+
+function persistAll() {
+  return (
+    save(STORAGE.users, users) &&
+    save(STORAGE.products, products) &&
+    save(STORAGE.orders, orders) &&
+    save(STORAGE.cart, carts)
+  );
+}
+
+/* -------------------- GENERAL HELPERS -------------------- */
 
 function makeId(prefix = "ID") {
   return prefix + Date.now().toString(36) +
@@ -76,7 +95,10 @@ function escapeHTML(value) {
 
 function showToast(message) {
   const toast = $("toast");
-  if (!toast) return;
+  if (!toast) {
+    console.log(message);
+    return;
+  }
 
   toast.textContent = message;
   toast.classList.add("show");
@@ -96,11 +118,23 @@ function setMessage(id, message, success = false) {
   element.style.color = success ? "#477b5a" : "#b64b55";
 }
 
-function persistAll() {
-  save(STORAGE.users, users);
-  save(STORAGE.products, products);
-  save(STORAGE.orders, orders);
-  save(STORAGE.cart, carts);
+function emptyState(title, description) {
+  return `
+    <div class="empty-state">
+      <strong>${escapeHTML(title)}</strong>
+      ${escapeHTML(description)}
+    </div>
+  `;
+}
+
+function formatDate(date) {
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "Date unavailable";
+  }
+
+  return parsed.toLocaleString("en-PH");
 }
 
 function findProduct(id) {
@@ -120,22 +154,37 @@ function getCart() {
   return carts[currentUser.id] || [];
 }
 
+function getOrderStatusClass(status) {
+  if (status === "Completed") return "green";
+  if (status === "Cancelled") return "red";
+  return "";
+}
+
+function getPaymentStatusClass(status) {
+  if (status === "Paid") return "green";
+  if (status === "Cancelled") return "red";
+  return "";
+}
+
+/* -------------------- CART STORAGE -------------------- */
+
 function setCart(items) {
-  if (!currentUser) return;
+  if (!currentUser) return false;
+
+  const previous = carts[currentUser.id] || [];
 
   carts[currentUser.id] = items;
-  save(STORAGE.cart, carts);
+
+  if (!save(STORAGE.cart, carts)) {
+    carts[currentUser.id] = previous;
+    return false;
+  }
+
   updateCartCount();
+  return true;
 }
 
-function emptyState(title, description) {
-  return `
-    <div class="empty-state">
-      <strong>${escapeHTML(title)}</strong>
-      ${escapeHTML(description)}
-    </div>
-  `;
-}
+/* -------------------- PRODUCT IMAGE -------------------- */
 
 function getImageMarkup(product) {
   const image = product.image || "💐";
@@ -143,19 +192,23 @@ function getImageMarkup(product) {
   if (/^(https?:\/\/|data:image\/)/i.test(image)) {
     return `
       <div class="product-image">
-        <img src="${escapeHTML(image)}"
+        <img
+          src="${escapeHTML(image)}"
           alt="${escapeHTML(product.name)}"
-          onerror="this.style.display='none';this.parentElement.textContent='💐'">
+          onerror="this.style.display='none';this.parentElement.textContent='💐'"
+        >
       </div>
     `;
   }
 
   return `
-    <div class="product-image">${escapeHTML(image)}</div>
+    <div class="product-image">
+      ${escapeHTML(image)}
+    </div>
   `;
 }
 
-/* -------------------- DEFAULT DATA -------------------- */
+/* -------------------- INITIAL DATA -------------------- */
 
 function initializeData() {
   if (!Array.isArray(users)) users = [];
@@ -166,7 +219,7 @@ function initializeData() {
     carts = {};
   }
 
-  // Create an administrator account if one does not exist.
+  // Create administrator if none exists.
   if (!users.some(user => user.role === "admin")) {
     users.push({
       id: makeId("USR"),
@@ -214,53 +267,143 @@ function initializeData() {
     }));
   }
 
+  // Normalize older saved products.
+  products = products.map(product => ({
+    ...product,
+    id: product.id || makeId("PRD"),
+    name: String(product.name || "Flower"),
+    category: String(product.category || "Flowers"),
+    description: String(product.description || ""),
+    price: Number(product.price) || 0,
+    stock: Math.max(0, Number(product.stock) || 0),
+    image: product.image || "💐"
+  }));
+
   persistAll();
 }
 
 initializeData();
 
+/* -------------------- PASSWORD VISIBILITY -------------------- */
+
+function togglePassword(inputId, button) {
+  const input = $(inputId);
+  if (!input || !button) return;
+
+  const showing = input.type === "text";
+
+  input.type = showing ? "password" : "text";
+  button.textContent = showing ? "👁" : "🙈";
+
+  button.setAttribute(
+    "aria-label",
+    showing ? "Show password" : "Hide password"
+  );
+
+  button.title = showing ? "Show password" : "Hide password";
+}
+
+function enhancePasswordFields() {
+  const passwordIds = [
+    "loginPassword",
+    "registerPassword",
+    "registerConfirm",
+    "profilePassword",
+    "settingsPassword",
+    "settingsConfirm"
+  ];
+
+  passwordIds.forEach(id => {
+    const input = $(id);
+    if (!input) return;
+
+    // Do not add duplicate buttons.
+    if (input.dataset.toggleAdded === "true") return;
+
+    const parent = input.parentElement;
+
+    const existingButton = parent?.querySelector(
+      `button[onclick*="${id}"]`
+    );
+
+    if (existingButton) {
+      existingButton.type = "button";
+      existingButton.textContent = "👁";
+      existingButton.classList.add("password-toggle");
+      existingButton.setAttribute("aria-label", "Show password");
+      existingButton.title = "Show password";
+      input.dataset.toggleAdded = "true";
+      return;
+    }
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "password-field";
+
+    input.parentNode.insertBefore(wrapper, input);
+    wrapper.appendChild(input);
+
+    const button = document.createElement("button");
+
+    button.type = "button";
+    button.className = "password-toggle";
+    button.textContent = "👁";
+    button.setAttribute("aria-label", "Show password");
+    button.title = "Show password";
+
+    button.addEventListener("click", () => {
+      togglePassword(id, button);
+    });
+
+    wrapper.appendChild(button);
+
+    input.dataset.toggleAdded = "true";
+  });
+}
+
 /* -------------------- AUTHENTICATION -------------------- */
 
 function showLogin() {
-  $("loginForm").classList.remove("hidden");
-  $("registerForm").classList.add("hidden");
-  $("authSwitch").classList.remove("hidden");
-  $("loginSwitch").classList.add("hidden");
+  $("loginForm")?.classList.remove("hidden");
+  $("registerForm")?.classList.add("hidden");
 
-  $("authTitle").textContent = "Welcome Back";
-  $("authSubtitle").textContent =
-    "Sign in to continue to your flower shop.";
+  $("authSwitch")?.classList.remove("hidden");
+  $("loginSwitch")?.classList.add("hidden");
+
+  if ($("authTitle")) {
+    $("authTitle").textContent = "Welcome Back";
+  }
+
+  if ($("authSubtitle")) {
+    $("authSubtitle").textContent =
+      "Sign in to continue to your flower shop.";
+  }
 
   setMessage("loginMessage", "");
   setMessage("registerMessage", "");
 }
 
 function showRegister() {
-  $("loginForm").classList.add("hidden");
-  $("registerForm").classList.remove("hidden");
-  $("authSwitch").classList.add("hidden");
-  $("loginSwitch").classList.remove("hidden");
+  $("loginForm")?.classList.add("hidden");
+  $("registerForm")?.classList.remove("hidden");
 
-  $("authTitle").textContent = "Create Account";
-  $("authSubtitle").textContent =
-    "Register your customer account.";
+  $("authSwitch")?.classList.add("hidden");
+  $("loginSwitch")?.classList.remove("hidden");
+
+  if ($("authTitle")) {
+    $("authTitle").textContent = "Create Account";
+  }
+
+  if ($("authSubtitle")) {
+    $("authSubtitle").textContent = "Register your customer account.";
+  }
 
   setMessage("loginMessage", "");
   setMessage("registerMessage", "");
 }
 
-function togglePassword(inputId, button) {
-  const input = $(inputId);
-  if (!input) return;
+/* -------------------- REGISTER -------------------- */
 
-  const showing = input.type === "text";
-  input.type = showing ? "password" : "text";
-  button.textContent = showing ? "Show" : "Hide";
-}
-
-/* REGISTER */
-
-$("registerForm").addEventListener("submit", event => {
+on("registerForm", "submit", event => {
   event.preventDefault();
 
   const name = $("registerName").value.trim();
@@ -273,15 +416,24 @@ $("registerForm").addEventListener("submit", event => {
   }
 
   if (username.length < 3) {
-    return setMessage("registerMessage", "Username must have at least 3 characters.");
+    return setMessage(
+      "registerMessage",
+      "Username must have at least 3 characters."
+    );
   }
 
   if (!/^[a-zA-Z0-9_.-]+$/.test(username)) {
-    return setMessage("registerMessage", "Username may contain letters, numbers, dots, _ or - only.");
+    return setMessage(
+      "registerMessage",
+      "Username may contain letters, numbers, dots, _ or - only."
+    );
   }
 
   if (password.length < 6) {
-    return setMessage("registerMessage", "Password must have at least 6 characters.");
+    return setMessage(
+      "registerMessage",
+      "Password must have at least 6 characters."
+    );
   }
 
   if (password !== confirm) {
@@ -315,9 +467,11 @@ $("registerForm").addEventListener("submit", event => {
 
   $("registerForm").reset();
 
-  // Customer must log in after registration.
   showLogin();
-  $("loginUsername").value = username;
+
+  if ($("loginUsername")) {
+    $("loginUsername").value = username;
+  }
 
   setMessage(
     "loginMessage",
@@ -326,9 +480,9 @@ $("registerForm").addEventListener("submit", event => {
   );
 });
 
-/* LOGIN */
+/* -------------------- LOGIN -------------------- */
 
-$("loginForm").addEventListener("submit", event => {
+on("loginForm", "submit", event => {
   event.preventDefault();
 
   const username = $("loginUsername").value.trim().toLowerCase();
@@ -340,14 +494,21 @@ $("loginForm").addEventListener("submit", event => {
   );
 
   if (!user) {
-    return setMessage("loginMessage", "Incorrect username or password.");
+    return setMessage(
+      "loginMessage",
+      "Incorrect username or password."
+    );
   }
 
   if (user.active === false) {
-    return setMessage("loginMessage", "This account has been disabled. Contact the administrator.");
+    return setMessage(
+      "loginMessage",
+      "This account has been disabled. Contact the administrator."
+    );
   }
 
   currentUser = user;
+
   localStorage.setItem(STORAGE.session, user.id);
 
   $("loginForm").reset();
@@ -363,34 +524,43 @@ function logout() {
 
   localStorage.removeItem(STORAGE.session);
 
-  $("appScreen").classList.add("hidden");
-  $("authScreen").classList.remove("hidden");
-  $("headerUser").textContent = "";
+  $("appScreen")?.classList.add("hidden");
+  $("authScreen")?.classList.remove("hidden");
+
+  if ($("headerUser")) $("headerUser").textContent = "";
 
   closeAllModals();
   showLogin();
 
-  $("loginUsername").value = "";
-  $("loginPassword").value = "";
+  if ($("loginUsername")) $("loginUsername").value = "";
+  if ($("loginPassword")) $("loginPassword").value = "";
 
   showToast("You have logged out.");
 }
 
 function openApplication() {
-  $("authScreen").classList.add("hidden");
-  $("appScreen").classList.remove("hidden");
+  if (!currentUser) return;
 
-  $("headerUser").textContent =
-    `${currentUser.name} · ${currentUser.role}`;
+  $("authScreen")?.classList.add("hidden");
+  $("appScreen")?.classList.remove("hidden");
 
-  $("roleLabel").textContent =
-    isAdmin() ? "Administrator" : "Customer";
+  if ($("headerUser")) {
+    $("headerUser").textContent =
+      `${currentUser.name} · ${currentUser.role}`;
+  }
 
-  $("welcomeText").textContent =
-    `Welcome, ${currentUser.name}!`;
+  if ($("roleLabel")) {
+    $("roleLabel").textContent =
+      isAdmin() ? "Administrator" : "Customer";
+  }
 
-  $("customerNav").classList.toggle("hidden", isAdmin());
-  $("adminNav").classList.toggle("hidden", !isAdmin());
+  if ($("welcomeText")) {
+    $("welcomeText").textContent =
+      `Welcome, ${currentUser.name}!`;
+  }
+
+  $("customerNav")?.classList.toggle("hidden", isAdmin());
+  $("adminNav")?.classList.toggle("hidden", !isAdmin());
 
   if (isAdmin()) {
     adminPage("dashboard");
@@ -429,8 +599,7 @@ function hideAllPages() {
 function activatePage(pageId, button) {
   hideAllPages();
 
-  const page = $(pageId);
-  if (page) page.classList.remove("hidden");
+  $(pageId)?.classList.remove("hidden");
 
   if (button) button.classList.add("active");
 }
@@ -449,7 +618,10 @@ function customerPage(page, button) {
   };
 
   currentPage = page;
-  $("pageTitle").textContent = titles[page] || "Petal & Vine";
+
+  if ($("pageTitle")) {
+    $("pageTitle").textContent = titles[page] || "Petal & Vine";
+  }
 
   activatePage("customer-" + page, button);
 
@@ -476,7 +648,10 @@ function adminPage(page, button) {
   };
 
   currentPage = page;
-  $("pageTitle").textContent = titles[page] || "Administration";
+
+  if ($("pageTitle")) {
+    $("pageTitle").textContent = titles[page] || "Administration";
+  }
 
   activatePage("admin-" + page, button);
 
@@ -494,7 +669,7 @@ function renderShop() {
   const container = $("shopProducts");
   if (!container) return;
 
-  const search = $("productSearch").value.trim().toLowerCase();
+  const search = $("productSearch")?.value.trim().toLowerCase() || "";
 
   const filtered = products.filter(product =>
     product.name.toLowerCase().includes(search) ||
@@ -503,7 +678,10 @@ function renderShop() {
   );
 
   if (!filtered.length) {
-    container.innerHTML = emptyState("No flowers found", "Try another search.");
+    container.innerHTML = emptyState(
+      "No flowers found",
+      "Try another search or check back later."
+    );
     return;
   }
 
@@ -519,32 +697,41 @@ function renderShop() {
         <div class="price">${money(product.price)}</div>
 
         <div class="stock">
-          ${product.stock > 0 ? `${product.stock} available` : "Out of stock"}
+          ${product.stock > 0
+            ? `${product.stock} available`
+            : "Out of stock"}
         </div>
 
-        <label class="quantity-label" for="quantity-${product.id}">
+        <label class="quantity-label"
+          for="quantity-${product.id}">
           Quantity
         </label>
 
-        <input class="product-quantity"
+        <input
+          class="product-quantity"
           id="quantity-${product.id}"
           type="number"
           min="1"
           step="1"
-          max="${Math.max(1, product.stock)}"
+          max="${product.stock}"
           value="1"
-          ${product.stock <= 0 ? "disabled" : ""}>
+          ${product.stock <= 0 ? "disabled" : ""}
+        >
 
         <div class="product-actions">
-          <button class="btn outline"
+          <button
+            class="btn outline"
             onclick="addToCart('${product.id}')"
-            ${product.stock <= 0 ? "disabled" : ""}>
+            ${product.stock <= 0 ? "disabled" : ""}
+          >
             Add to Cart
           </button>
 
-          <button class="btn primary"
+          <button
+            class="btn primary"
             onclick="buyNow('${product.id}')"
-            ${product.stock <= 0 ? "disabled" : ""}>
+            ${product.stock <= 0 ? "disabled" : ""}
+          >
             Buy Now
           </button>
         </div>
@@ -553,7 +740,7 @@ function renderShop() {
   `).join("");
 }
 
-$("productSearch").addEventListener("input", renderShop);
+on("productSearch", "input", renderShop);
 
 function getChosenQuantity(productId) {
   const input = $("quantity-" + productId);
@@ -582,16 +769,30 @@ function addToCart(productId) {
   if (!currentUser || isAdmin()) return;
 
   const product = findProduct(productId);
-  const quantity = getChosenQuantity(productId);
 
-  if (!product || quantity === null) return;
+  if (!product) {
+    return showToast("This flower is no longer available.");
+  }
+
+  const quantity = getChosenQuantity(productId);
+  if (quantity === null) return;
 
   const cart = getCart();
-  const existing = cart.find(item => item.productId === productId);
-  const newQuantity = (existing?.quantity || 0) + quantity;
+
+  const existing = cart.find(item =>
+    item.productId === productId
+  );
+
+  const currentQuantity = existing
+    ? Number(existing.quantity)
+    : 0;
+
+  const newQuantity = currentQuantity + quantity;
 
   if (newQuantity > product.stock) {
-    return showToast(`Your cart cannot exceed the available stock of ${product.stock}.`);
+    return showToast(
+      `Only ${product.stock} flower(s) are available.`
+    );
   }
 
   if (existing) {
@@ -600,8 +801,9 @@ function addToCart(productId) {
     cart.push({ productId, quantity });
   }
 
-  setCart(cart);
-  showToast(`${product.name} added to your cart.`);
+  if (!setCart(cart)) return;
+
+  showToast(`${product.name} added to your cart!`);
 }
 
 function buyNow(productId) {
@@ -613,8 +815,6 @@ function buyNow(productId) {
   if (!product || quantity === null) return;
 
   pendingPurchase = [{ productId, quantity }];
-
-  // Buy Now must not remove or alter existing cart items.
   checkoutSource = "buyNow";
 
   openCheckout(pendingPurchase);
@@ -623,7 +823,19 @@ function buyNow(productId) {
 /* -------------------- CART -------------------- */
 
 function updateCartCount() {
-  const count = getCart().reduce((total, item) =>
+  if (!currentUser) {
+    if ($("cartCount")) $("cartCount").textContent = "0";
+    return;
+  }
+
+  let cart = getCart();
+
+  cart = cart.filter(item => findProduct(item.productId));
+
+  carts[currentUser.id] = cart;
+  save(STORAGE.cart, carts);
+
+  const count = cart.reduce((total, item) =>
     total + Number(item.quantity || 0), 0
   );
 
@@ -634,11 +846,17 @@ function updateCartCount() {
 
 function renderCart() {
   const container = $("cartContent");
-  if (!container) return;
+  if (!container || !currentUser) return;
 
-  const cart = getCart().filter(item =>
-    findProduct(item.productId)
-  );
+  let cart = getCart();
+
+  // Remove products that no longer exist.
+  cart = cart.filter(item => findProduct(item.productId));
+
+  carts[currentUser.id] = cart;
+  save(STORAGE.cart, carts);
+
+  updateCartCount();
 
   if (!cart.length) {
     container.innerHTML = emptyState(
@@ -652,8 +870,9 @@ function renderCart() {
 
   const rows = cart.map(item => {
     const product = findProduct(item.productId);
-    const subtotal = product.price * item.quantity;
+    if (!product) return "";
 
+    const subtotal = product.price * item.quantity;
     total += subtotal;
 
     return `
@@ -666,21 +885,28 @@ function renderCart() {
 
         <div>
           <label for="cart-qty-${product.id}">Quantity</label>
-          <input class="qty-input"
+
+          <input
+            class="qty-input"
             id="cart-qty-${product.id}"
             type="number"
             min="1"
             step="1"
             max="${product.stock}"
             value="${item.quantity}"
-            onchange="updateCartQuantity('${product.id}',this.value)">
+            onchange="updateCartQuantity('${product.id}',this.value)"
+          >
         </div>
 
-        <div><strong>${money(subtotal)}</strong></div>
+        <div>
+          <strong>${money(subtotal)}</strong>
+        </div>
 
         <div>
-          <button class="btn danger small"
-            onclick="removeFromCart('${product.id}')">
+          <button
+            class="btn danger small"
+            onclick="removeFromCart('${product.id}')"
+          >
             Remove
           </button>
         </div>
@@ -695,7 +921,11 @@ function renderCart() {
       <p>Total Amount</p>
       <strong>${money(total)}</strong>
       <br><br>
-      <button class="btn primary" onclick="checkoutCart()">
+
+      <button
+        class="btn primary"
+        onclick="checkoutCart()"
+      >
         Proceed to Checkout
       </button>
     </div>
@@ -703,10 +933,10 @@ function renderCart() {
 }
 
 function updateCartQuantity(productId, value) {
-  const quantity = Number(value);
   const product = findProduct(productId);
-
   if (!product) return;
+
+  const quantity = Number(value);
 
   if (!Number.isInteger(quantity) || quantity < 1) {
     showToast("Quantity must be at least 1.");
@@ -726,8 +956,10 @@ function updateCartQuantity(productId, value) {
   if (!item) return;
 
   item.quantity = quantity;
-  setCart(cart);
-  renderCart();
+
+  if (setCart(cart)) {
+    renderCart();
+  }
 }
 
 function removeFromCart(productId) {
@@ -735,7 +967,8 @@ function removeFromCart(productId) {
     item.productId !== productId
   );
 
-  setCart(cart);
+  if (!setCart(cart)) return;
+
   renderCart();
   showToast("Item removed from cart.");
 }
@@ -762,17 +995,20 @@ function checkoutCart() {
 /* -------------------- CHECKOUT -------------------- */
 
 function openCheckout(items) {
-  if (!items || !items.length) return;
+  if (!items || !items.length || !currentUser) return;
 
   for (const item of items) {
     const product = findProduct(item.productId);
 
-    if (!product ||
-        !Number.isInteger(item.quantity) ||
-        item.quantity < 1 ||
-        item.quantity > product.stock) {
+    if (
+      !product ||
+      !Number.isInteger(item.quantity) ||
+      item.quantity < 1 ||
+      item.quantity > product.stock
+    ) {
       pendingPurchase = null;
       checkoutSource = null;
+
       showToast("One or more items are no longer available.");
       return;
     }
@@ -794,13 +1030,18 @@ function openCheckout(items) {
 
       return `
         <div class="receipt-line">
-          <span>${escapeHTML(product.name)} × ${item.quantity}</span>
+          <span>
+            ${escapeHTML(product.name)} × ${item.quantity}
+          </span>
           <strong>${money(product.price * item.quantity)}</strong>
         </div>
       `;
     }).join("")}
 
-    <div class="receipt-total">Total: ${money(total)}</div>
+    <div class="receipt-total">
+      Total: ${money(total)}
+    </div>
+
     <p class="muted">Payment: Cash on Delivery (COD)</p>
   `;
 
@@ -808,10 +1049,10 @@ function openCheckout(items) {
   $("checkoutPhone").value = currentUser.phone || "";
   $("checkoutAddress").value = currentUser.address || "";
 
-  $("checkoutModal").classList.remove("hidden");
+  $("checkoutModal")?.classList.remove("hidden");
 }
 
-$("checkoutForm").addEventListener("submit", event => {
+on("checkoutForm", "submit", event => {
   event.preventDefault();
 
   if (!currentUser || !pendingPurchase?.length) return;
@@ -832,15 +1073,19 @@ $("checkoutForm").addEventListener("submit", event => {
     return showToast("Please enter your complete delivery address.");
   }
 
-  // Validate all products before reducing stock.
+  // Validate all products before deducting stock.
   for (const item of pendingPurchase) {
     const product = findProduct(item.productId);
 
-    if (!product ||
-        !Number.isInteger(item.quantity) ||
-        item.quantity < 1 ||
-        product.stock < item.quantity) {
-      return showToast("An item does not have enough stock. Please review your order.");
+    if (
+      !product ||
+      !Number.isInteger(item.quantity) ||
+      item.quantity < 1 ||
+      product.stock < item.quantity
+    ) {
+      return showToast(
+        "An item does not have enough stock. Please review your order."
+      );
     }
   }
 
@@ -876,21 +1121,17 @@ $("checkoutForm").addEventListener("submit", event => {
     createdAt: new Date().toISOString()
   };
 
-  // Snapshot old values so storage errors do not leave partial changes.
-  const oldStocks = products.map(product => ({
-    id: product.id,
-    stock: product.stock
-  }));
+  const oldProducts = JSON.stringify(products);
+  const oldOrders = JSON.stringify(orders);
+  const oldCarts = JSON.stringify(carts);
+  const oldUsers = JSON.stringify(users);
 
-  const oldCart = getCart().map(item => ({ ...item }));
-  const oldOrders = [...orders];
-
-  // Reduce stock only after all validations pass.
+  // Deduct stock.
   pendingPurchase.forEach(item => {
     findProduct(item.productId).stock -= item.quantity;
   });
 
-  // Only cart checkout removes purchased quantities from cart.
+  // Remove purchased quantities from cart only for cart checkout.
   if (checkoutSource === "cart") {
     const cart = getCart();
 
@@ -917,22 +1158,23 @@ $("checkoutForm").addEventListener("submit", event => {
 
   orders.unshift(order);
 
-  const saved = save(STORAGE.products, products) &&
+  const saved =
+    save(STORAGE.products, products) &&
     save(STORAGE.orders, orders) &&
     save(STORAGE.users, users) &&
     save(STORAGE.cart, carts);
 
   if (!saved) {
-    oldStocks.forEach(old => {
-      const product = findProduct(old.id);
-      if (product) product.stock = old.stock;
-    });
+    products = JSON.parse(oldProducts);
+    orders = JSON.parse(oldOrders);
+    carts = JSON.parse(oldCarts);
+    users = JSON.parse(oldUsers);
 
-    carts[currentUser.id] = oldCart;
-    orders = oldOrders;
+    currentUser = findUser(currentUser.id);
 
     persistAll();
-    return;
+
+    return showToast("Order could not be saved. Please try again.");
   }
 
   pendingPurchase = null;
@@ -942,14 +1184,16 @@ $("checkoutForm").addEventListener("submit", event => {
   closeModal("checkoutModal");
 
   updateCartCount();
-  renderReceipt(order);
 
-  showToast("Your order has been placed successfully.");
+  renderReceipt(order);
+  showToast("Your order has been placed successfully!");
 });
 
 /* -------------------- RECEIPTS -------------------- */
 
 function renderReceipt(order) {
+  if (!order || !Array.isArray(order.items)) return;
+
   $("receiptContent").innerHTML = `
     <div class="receipt">
       <h2>✿ Petal & Vine</h2>
@@ -965,7 +1209,7 @@ function renderReceipt(order) {
 
       <div class="receipt-line">
         <span>Order Date</span>
-        <strong>${new Date(order.createdAt).toLocaleString()}</strong>
+        <strong>${formatDate(order.createdAt)}</strong>
       </div>
 
       <div class="receipt-line">
@@ -988,9 +1232,11 @@ function renderReceipt(order) {
       ${order.items.map(item => `
         <div class="receipt-line">
           <span>
-            ${escapeHTML(item.name)} × ${item.quantity}
-            <br><small>${money(item.price)} each</small>
+            ${escapeHTML(item.name)} × ${Number(item.quantity)}
+            <br>
+            <small>${money(item.price)} each</small>
           </span>
+
           <strong>${money(item.subtotal)}</strong>
         </div>
       `).join("")}
@@ -1001,32 +1247,120 @@ function renderReceipt(order) {
 
       <div class="receipt-line">
         <span>Payment Method</span>
-        <strong>Cash on Delivery</strong>
+        <strong>${escapeHTML(order.paymentMethod || "Cash on Delivery")}</strong>
       </div>
 
       <div class="receipt-line">
         <span>Payment Status</span>
-        <strong>${escapeHTML(order.paymentStatus)}</strong>
+        <strong>${escapeHTML(order.paymentStatus || "Pending")}</strong>
       </div>
 
       <div class="receipt-line">
         <span>Order Status</span>
-        <strong>${escapeHTML(order.status)}</strong>
+        <strong>${escapeHTML(order.status || "Pending")}</strong>
       </div>
 
       <p>Thank you for shopping with Petal & Vine!</p>
       <p class="muted">Please keep this receipt for your records.</p>
     </div>
+
+    <div class="receipt-actions no-print">
+      <button type="button" class="btn primary" onclick="printReceipt()">
+        Print Receipt
+      </button>
+    </div>
   `;
 
-  $("receiptModal").classList.remove("hidden");
+  $("receiptModal")?.classList.remove("hidden");
+}
+
+function printReceipt() {
+  const receipt = $("receiptContent")?.querySelector(".receipt");
+
+  if (!receipt) {
+    return showToast("No receipt is available to print.");
+  }
+
+  const printWindow = window.open("", "_blank", "width=800,height=700");
+
+  if (!printWindow) {
+    return showToast("Please allow pop-ups to print your receipt.");
+  }
+
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Petal & Vine Receipt</title>
+      <meta charset="UTF-8">
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          padding: 25px;
+          color: #333;
+          max-width: 700px;
+          margin: auto;
+        }
+
+        h2, h3, p {
+          text-align: center;
+        }
+
+        .receipt-line {
+          display: flex;
+          justify-content: space-between;
+          gap: 20px;
+          padding: 9px 0;
+          border-bottom: 1px solid #eee;
+        }
+
+        .receipt-total {
+          text-align: right;
+          font-size: 20px;
+          font-weight: bold;
+          margin-top: 20px;
+        }
+
+        .muted {
+          color: #777;
+        }
+
+        hr {
+          border: 0;
+          border-top: 1px solid #ddd;
+        }
+
+        @media print {
+          body {
+            padding: 0;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      ${receipt.innerHTML}
+      <script>
+        window.onload = function() {
+          window.print();
+        };
+      <\/script>
+    </body>
+    </html>
+  `);
+
+  printWindow.document.close();
 }
 
 function viewReceipt(orderId) {
-  const order = orders.find(item => item.id === orderId);
-  if (!order) return;
+  if (!currentUser) return;
 
-  if (!isAdmin() && order.userId !== currentUser?.id) {
+  const order = orders.find(item => item.id === orderId);
+
+  if (!order) {
+    return showToast("Receipt not found.");
+  }
+
+  if (!isAdmin() && order.userId !== currentUser.id) {
     return showToast("You cannot view this receipt.");
   }
 
@@ -1037,14 +1371,17 @@ function viewReceipt(orderId) {
 
 function renderCustomerOrders() {
   const container = $("customerOrders");
-  if (!container) return;
+  if (!container || !currentUser) return;
 
   const myOrders = orders.filter(order =>
     order.userId === currentUser.id
   );
 
   if (!myOrders.length) {
-    container.innerHTML = emptyState("No orders yet", "Your placed orders will appear here.");
+    container.innerHTML = emptyState(
+      "No orders yet",
+      "Your placed orders will appear here."
+    );
     return;
   }
 
@@ -1053,79 +1390,140 @@ function renderCustomerOrders() {
       <div class="section-heading">
         <div>
           <h3>${escapeHTML(order.receiptNo)}</h3>
-          <p class="muted">${new Date(order.createdAt).toLocaleString()}</p>
+          <p class="muted">${formatDate(order.createdAt)}</p>
         </div>
 
-        <span class="badge ${
-          order.status === "Completed" ? "green" :
-          order.status === "Cancelled" ? "red" : ""
-        }">${escapeHTML(order.status)}</span>
+        <span class="badge ${getOrderStatusClass(order.status)}">
+          ${escapeHTML(order.status || "Pending")}
+        </span>
       </div>
 
       ${order.items.map(item => `
         <div class="receipt-line">
-          <span>${escapeHTML(item.name)} × ${item.quantity}</span>
+          <span>
+            ${escapeHTML(item.name)} × ${Number(item.quantity)}
+          </span>
           <strong>${money(item.subtotal)}</strong>
         </div>
       `).join("")}
 
-      <div class="receipt-total">Total: ${money(order.total)}</div>
+      <div class="receipt-total">
+        Total: ${money(order.total)}
+      </div>
 
       <p class="muted">
-        Payment: ${escapeHTML(order.paymentMethod)}
-        · ${escapeHTML(order.paymentStatus)}
+        Payment: ${escapeHTML(order.paymentMethod || "COD")}
+        · ${escapeHTML(order.paymentStatus || "Pending")}
       </p>
 
-      <button class="btn outline small"
-        onclick="viewReceipt('${order.id}')">
+      <button
+        class="btn outline small"
+        onclick="viewReceipt('${order.id}')"
+      >
         View Receipt
       </button>
     </div>
   `).join("");
 }
 
+/* -------------------- CUSTOMER RECEIPTS -------------------- */
+
 function renderCustomerReceipts() {
   const container = $("customerReceipts");
-  if (!container) return;
+  if (!container || !currentUser) return;
 
   const myOrders = orders.filter(order =>
     order.userId === currentUser.id
   );
 
   if (!myOrders.length) {
-    container.innerHTML = emptyState("No receipts available", "Your receipts will appear after placing an order.");
+    container.innerHTML = emptyState(
+      "No receipts available",
+      "Your receipts will appear after placing an order."
+    );
     return;
   }
 
   container.innerHTML = myOrders.map(order => `
     <div class="panel" style="margin-bottom:12px">
-      <strong>${escapeHTML(order.receiptNo)}</strong>
+      <div class="section-heading">
+        <div>
+          <h3>${escapeHTML(order.receiptNo)}</h3>
+          <p class="muted">${formatDate(order.createdAt)}</p>
+        </div>
 
-      <p class="muted">${new Date(order.createdAt).toLocaleString()}</p>
-      <p>Total: <strong>${money(order.total)}</strong></p>
+        <span class="badge ${getOrderStatusClass(order.status)}">
+          ${escapeHTML(order.status || "Pending")}
+        </span>
+      </div>
 
-      <button class="btn primary small"
-        onclick="viewReceipt('${order.id}')">
-        View / Print Receipt
-      </button>
+      <p>
+        Total:
+        <strong>${money(order.total)}</strong>
+      </p>
+
+      <p class="muted">
+        Payment: ${escapeHTML(order.paymentStatus || "Pending")}
+      </p>
+
+      <div class="product-actions">
+        <button
+          class="btn primary"
+          onclick="viewReceipt('${order.id}')"
+        >
+          View / Print Receipt
+        </button>
+      </div>
     </div>
   `).join("");
 }
 
+/* -------------------- CUSTOMER TRANSACTIONS -------------------- */
+
 function renderCustomerTransactions() {
   const container = $("customerTransactions");
-  if (!container) return;
+  if (!container || !currentUser) return;
 
   const myOrders = orders.filter(order =>
     order.userId === currentUser.id
   );
 
   if (!myOrders.length) {
-    container.innerHTML = emptyState("No transactions yet", "Your COD transactions will appear here.");
+    container.innerHTML = emptyState(
+      "No transactions yet",
+      "Your transactions will appear here after placing an order."
+    );
     return;
   }
 
+  const totalTransactions = myOrders.length;
+
+  const totalAmount = myOrders.reduce((sum, order) =>
+    sum + Number(order.total || 0), 0
+  );
+
+  const paidAmount = myOrders
+    .filter(order => order.paymentStatus === "Paid")
+    .reduce((sum, order) => sum + Number(order.total || 0), 0);
+
   container.innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-card">
+        <span>Total Transactions</span>
+        <strong>${totalTransactions}</strong>
+      </div>
+
+      <div class="stat-card">
+        <span>Total Order Amount</span>
+        <strong>${money(totalAmount)}</strong>
+      </div>
+
+      <div class="stat-card">
+        <span>Paid Amount</span>
+        <strong>${money(paidAmount)}</strong>
+      </div>
+    </div>
+
     <div class="table-wrap">
       <table>
         <thead>
@@ -1133,8 +1531,10 @@ function renderCustomerTransactions() {
             <th>Receipt No.</th>
             <th>Date</th>
             <th>Amount</th>
-            <th>Payment</th>
-            <th>Status</th>
+            <th>Payment Method</th>
+            <th>Payment Status</th>
+            <th>Order Status</th>
+            <th>Receipt</th>
           </tr>
         </thead>
 
@@ -1142,10 +1542,30 @@ function renderCustomerTransactions() {
           ${myOrders.map(order => `
             <tr>
               <td>${escapeHTML(order.receiptNo)}</td>
-              <td>${new Date(order.createdAt).toLocaleDateString()}</td>
+              <td>${new Date(order.createdAt).toLocaleDateString("en-PH")}</td>
               <td>${money(order.total)}</td>
               <td>COD</td>
-              <td>${escapeHTML(order.paymentStatus)}</td>
+
+              <td>
+                <span class="badge ${getPaymentStatusClass(order.paymentStatus)}">
+                  ${escapeHTML(order.paymentStatus || "Pending")}
+                </span>
+              </td>
+
+              <td>
+                <span class="badge ${getOrderStatusClass(order.status)}">
+                  ${escapeHTML(order.status || "Pending")}
+                </span>
+              </td>
+
+              <td>
+                <button
+                  class="btn outline small"
+                  onclick="viewReceipt('${order.id}')"
+                >
+                  View
+                </button>
+              </td>
             </tr>
           `).join("")}
         </tbody>
@@ -1157,6 +1577,8 @@ function renderCustomerTransactions() {
 /* -------------------- CUSTOMER PROFILE -------------------- */
 
 function renderProfile() {
+  if (!currentUser) return;
+
   $("profileName").value = currentUser.name || "";
   $("profileUsername").value = currentUser.username || "";
   $("profilePhone").value = currentUser.phone || "";
@@ -1166,7 +1588,7 @@ function renderProfile() {
   setMessage("profileMessage", "");
 }
 
-$("profileForm").addEventListener("submit", event => {
+on("profileForm", "submit", event => {
   event.preventDefault();
 
   if (!currentUser || isAdmin()) return;
@@ -1178,11 +1600,17 @@ $("profileForm").addEventListener("submit", event => {
   const password = $("profilePassword").value;
 
   if (name.length < 2 || username.length < 3) {
-    return setMessage("profileMessage", "Please enter a valid name and username.");
+    return setMessage(
+      "profileMessage",
+      "Please enter a valid name and username."
+    );
   }
 
   if (!/^[a-zA-Z0-9_.-]+$/.test(username)) {
-    return setMessage("profileMessage", "Username contains invalid characters.");
+    return setMessage(
+      "profileMessage",
+      "Username contains invalid characters."
+    );
   }
 
   const duplicate = users.some(user =>
@@ -1195,8 +1623,13 @@ $("profileForm").addEventListener("submit", event => {
   }
 
   if (password && password.length < 6) {
-    return setMessage("profileMessage", "New password must have at least 6 characters.");
+    return setMessage(
+      "profileMessage",
+      "New password must have at least 6 characters."
+    );
   }
+
+  const oldUser = { ...currentUser };
 
   currentUser.name = name;
   currentUser.username = username;
@@ -1205,10 +1638,16 @@ $("profileForm").addEventListener("submit", event => {
 
   if (password) currentUser.password = password;
 
-  save(STORAGE.users, users);
+  if (!save(STORAGE.users, users)) {
+    Object.assign(currentUser, oldUser);
+    return;
+  }
 
   $("welcomeText").textContent = `Welcome, ${currentUser.name}!`;
-  $("headerUser").textContent = `${currentUser.name} · ${currentUser.role}`;
+  $("headerUser").textContent =
+    `${currentUser.name} · ${currentUser.role}`;
+
+  $("profilePassword").value = "";
 
   setMessage("profileMessage", "Profile updated successfully.", true);
   showToast("Profile updated.");
@@ -1217,9 +1656,11 @@ $("profileForm").addEventListener("submit", event => {
 /* -------------------- ADMIN DASHBOARD -------------------- */
 
 function renderDashboard() {
+  if (!isAdmin()) return;
+
   const revenue = orders
     .filter(order => order.status !== "Cancelled")
-    .reduce((sum, order) => sum + Number(order.total), 0);
+    .reduce((sum, order) => sum + Number(order.total || 0), 0);
 
   const completed = orders.filter(order =>
     order.status === "Completed"
@@ -1272,12 +1713,14 @@ function renderDashboard() {
         <div class="receipt-line">
           <span>
             <strong>${escapeHTML(order.receiptNo)}</strong>
-            <br><small>${escapeHTML(order.customerName)}</small>
+            <br>
+            <small>${escapeHTML(order.customerName)}</small>
           </span>
 
           <span>
             ${money(order.total)}
-            <br><small>${escapeHTML(order.status)}</small>
+            <br>
+            <small>${escapeHTML(order.status)}</small>
           </span>
         </div>
       `).join("")
@@ -1290,7 +1733,7 @@ function renderAdminProducts() {
   const container = $("adminProducts");
   if (!container) return;
 
-  const search = $("adminProductSearch").value.trim().toLowerCase();
+  const search = $("adminProductSearch")?.value.trim().toLowerCase() || "";
 
   const filtered = products.filter(product =>
     product.name.toLowerCase().includes(search) ||
@@ -1298,7 +1741,10 @@ function renderAdminProducts() {
   );
 
   if (!filtered.length) {
-    container.innerHTML = emptyState("No products found", "Add a product or change your search.");
+    container.innerHTML = emptyState(
+      "No products found",
+      "Add a product or change your search."
+    );
     return;
   }
 
@@ -1315,13 +1761,17 @@ function renderAdminProducts() {
         <div class="stock">Stock: ${product.stock}</div>
 
         <div class="product-actions">
-          <button class="btn outline"
-            onclick="editProduct('${product.id}')">
+          <button
+            class="btn outline"
+            onclick="editProduct('${product.id}')"
+          >
             Edit
           </button>
 
-          <button class="btn danger"
-            onclick="deleteProduct('${product.id}')">
+          <button
+            class="btn danger"
+            onclick="deleteProduct('${product.id}')"
+          >
             Delete
           </button>
         </div>
@@ -1330,7 +1780,7 @@ function renderAdminProducts() {
   `).join("");
 }
 
-$("adminProductSearch").addEventListener("input", renderAdminProducts);
+on("adminProductSearch", "input", renderAdminProducts);
 
 function openProductModal() {
   if (!isAdmin()) return;
@@ -1351,7 +1801,10 @@ function editProduct(productId) {
   if (!isAdmin()) return;
 
   const product = findProduct(productId);
-  if (!product) return;
+
+  if (!product) {
+    return showToast("Product not found.");
+  }
 
   $("productId").value = product.id;
   $("productName").value = product.name;
@@ -1365,6 +1818,7 @@ function editProduct(productId) {
   selectedImage = product.image || "💐";
 
   $("productModalTitle").textContent = "Edit Product";
+
   showProductPreview(selectedImage);
 
   $("productModal").classList.remove("hidden");
@@ -1376,21 +1830,23 @@ function showProductPreview(value) {
 
   if (/^(https?:\/\/|data:image\/)/i.test(value || "")) {
     preview.innerHTML = `
-      <img src="${escapeHTML(value)}"
+      <img
+        src="${escapeHTML(value)}"
         alt="Product preview"
-        onerror="this.parentElement.textContent='Image unavailable'">
+        onerror="this.parentElement.textContent='Image unavailable'"
+      >
     `;
   } else {
     preview.textContent = value || "💐";
   }
 }
 
-$("productImage").addEventListener("input", () => {
+on("productImage", "input", () => {
   selectedImage = $("productImage").value.trim() || "💐";
   showProductPreview(selectedImage);
 });
 
-$("productImageFile").addEventListener("change", event => {
+on("productImageFile", "change", event => {
   const file = event.target.files[0];
   if (!file) return;
 
@@ -1420,7 +1876,9 @@ $("productImageFile").addEventListener("change", event => {
   reader.readAsDataURL(file);
 });
 
-$("productForm").addEventListener("submit", event => {
+/* ADD / EDIT PRODUCT */
+
+on("productForm", "submit", event => {
   event.preventDefault();
 
   if (!isAdmin()) return;
@@ -1431,7 +1889,11 @@ $("productForm").addEventListener("submit", event => {
   const description = $("productDescription").value.trim();
   const price = Number($("productPrice").value);
   const stock = Number($("productStock").value);
-  const image = selectedImage || $("productImage").value.trim() || "💐";
+
+  const image =
+    selectedImage ||
+    $("productImage").value.trim() ||
+    "💐";
 
   if (!name || !category) {
     return showToast("Enter the product name and category.");
@@ -1442,12 +1904,18 @@ $("productForm").addEventListener("submit", event => {
   }
 
   if (!Number.isInteger(stock) || stock < 0) {
-    return showToast("Stock must be a whole number of 0 or more.");
+    return showToast("Stock must be 0 or a positive whole number.");
   }
+
+  const oldProducts = JSON.stringify(products);
+  const oldCarts = JSON.stringify(carts);
 
   if (id) {
     const product = findProduct(id);
-    if (!product) return;
+
+    if (!product) {
+      return showToast("Product not found.");
+    }
 
     product.name = name;
     product.category = category;
@@ -1456,7 +1924,18 @@ $("productForm").addEventListener("submit", event => {
     product.stock = stock;
     product.image = image;
 
-    showToast("Product updated successfully.");
+    // Update cart quantities if the stock was reduced.
+    Object.keys(carts).forEach(userId => {
+      carts[userId] = (carts[userId] || []).map(item => {
+        if (item.productId !== id) return item;
+
+        return {
+          ...item,
+          quantity: Math.min(Number(item.quantity), stock)
+        };
+      }).filter(item => item.quantity > 0);
+    });
+
   } else {
     products.push({
       id: makeId("PRD"),
@@ -1467,43 +1946,89 @@ $("productForm").addEventListener("submit", event => {
       stock,
       image
     });
-
-    showToast("Product added successfully.");
   }
 
-  if (!save(STORAGE.products, products)) return;
+  const saved =
+    save(STORAGE.products, products) &&
+    save(STORAGE.cart, carts);
+
+  if (!saved) {
+    products = JSON.parse(oldProducts);
+    carts = JSON.parse(oldCarts);
+    persistAll();
+    return;
+  }
 
   closeModal("productModal");
+
   renderAdminProducts();
   renderInventory();
   renderDashboard();
+
+  if (currentPage === "shop") renderShop();
+  if (currentPage === "cart") renderCart();
+
+  updateCartCount();
+
+  showToast(
+    id
+      ? "Flower updated successfully!"
+      : "New flower added successfully!"
+  );
 });
+
+/* DELETE PRODUCT */
 
 function deleteProduct(productId) {
   if (!isAdmin()) return;
 
   const product = findProduct(productId);
-  if (!product) return showToast("Product not found.");
 
-  if (!confirm(`Delete "${product.name}"? This cannot be undone.`)) {
+  if (!product) {
+    return showToast("Product not found.");
+  }
+
+  if (!confirm(
+    `Are you sure you want to delete "${product.name}"?`
+  )) {
     return;
   }
 
-  products = products.filter(item => item.id !== productId);
+  const oldProducts = JSON.stringify(products);
+  const oldCarts = JSON.stringify(carts);
 
+  products = products.filter(item =>
+    item.id !== productId
+  );
+
+  // Remove deleted product from every customer's cart.
   Object.keys(carts).forEach(userId => {
     carts[userId] = (carts[userId] || []).filter(item =>
       item.productId !== productId
     );
   });
 
-  persistAll();
+  const saved =
+    save(STORAGE.products, products) &&
+    save(STORAGE.cart, carts);
+
+  if (!saved) {
+    products = JSON.parse(oldProducts);
+    carts = JSON.parse(oldCarts);
+    persistAll();
+    return;
+  }
 
   renderAdminProducts();
   renderInventory();
   renderDashboard();
 
-  showToast("Product deleted successfully.");
+  if (currentPage === "shop") renderShop();
+  if (currentPage === "cart") renderCart();
+
+  updateCartCount();
+
+  showToast(`${product.name} deleted successfully!`);
 }
 
 /* -------------------- ADMIN INVENTORY -------------------- */
@@ -1513,7 +2038,10 @@ function renderInventory() {
   if (!container) return;
 
   if (!products.length) {
-    container.innerHTML = emptyState("No inventory", "Add products to start managing stock.");
+    container.innerHTML = emptyState(
+      "No inventory",
+      "Add products to start managing stock."
+    );
     return;
   }
 
@@ -1538,19 +2066,38 @@ function renderInventory() {
               <td>${escapeHTML(product.category)}</td>
               <td>${money(product.price)}</td>
               <td>${product.stock}</td>
+
               <td>
                 <span class="badge ${
-                  product.stock === 0 ? "red" :
-                  product.stock <= 5 ? "" : "green"
+                  product.stock === 0
+                    ? "red"
+                    : product.stock <= 5
+                      ? ""
+                      : "green"
                 }">
-                  ${product.stock === 0 ? "Out of Stock" :
-                    product.stock <= 5 ? "Low Stock" : "Available"}
+                  ${
+                    product.stock === 0
+                      ? "Out of Stock"
+                      : product.stock <= 5
+                        ? "Low Stock"
+                        : "Available"
+                  }
                 </span>
               </td>
+
               <td>
-                <button class="btn outline small"
-                  onclick="editProduct('${product.id}')">
+                <button
+                  class="btn outline small"
+                  onclick="editProduct('${product.id}')"
+                >
                   Edit
+                </button>
+
+                <button
+                  class="btn danger small"
+                  onclick="deleteProduct('${product.id}')"
+                >
+                  Delete
                 </button>
               </td>
             </tr>
@@ -1568,7 +2115,10 @@ function renderAdminOrders() {
   if (!container) return;
 
   if (!orders.length) {
-    container.innerHTML = emptyState("No customer orders", "Orders placed by customers will appear here.");
+    container.innerHTML = emptyState(
+      "No customer orders",
+      "Orders placed by customers will appear here."
+    );
     return;
   }
 
@@ -1577,21 +2127,39 @@ function renderAdminOrders() {
       <div class="section-heading">
         <div>
           <h3>${escapeHTML(order.receiptNo)}</h3>
-          <p class="muted">${new Date(order.createdAt).toLocaleString()}</p>
+          <p class="muted">${formatDate(order.createdAt)}</p>
         </div>
+
         <strong>${money(order.total)}</strong>
       </div>
 
-      <p><strong>Customer:</strong> ${escapeHTML(order.customerName)}</p>
-      <p><strong>Contact:</strong> ${escapeHTML(order.phone)}</p>
-      <p><strong>Address:</strong> ${escapeHTML(order.address)}</p>
-      <p><strong>Payment:</strong> COD · ${escapeHTML(order.paymentStatus)}</p>
+      <p>
+        <strong>Customer:</strong>
+        ${escapeHTML(order.customerName)}
+      </p>
+
+      <p>
+        <strong>Contact:</strong>
+        ${escapeHTML(order.phone)}
+      </p>
+
+      <p>
+        <strong>Address:</strong>
+        ${escapeHTML(order.address)}
+      </p>
+
+      <p>
+        <strong>Payment:</strong>
+        COD · ${escapeHTML(order.paymentStatus || "Pending")}
+      </p>
 
       <h4>Items</h4>
 
       ${order.items.map(item => `
         <div class="receipt-line">
-          <span>${escapeHTML(item.name)} × ${item.quantity}</span>
+          <span>
+            ${escapeHTML(item.name)} × ${item.quantity}
+          </span>
           <strong>${money(item.subtotal)}</strong>
         </div>
       `).join("")}
@@ -1600,21 +2168,31 @@ function renderAdminOrders() {
 
       <label for="status-${order.id}">Order Status</label>
 
-      <select id="status-${order.id}"
+      <select
+        id="status-${order.id}"
         onchange="updateOrderStatus('${order.id}',this.value)"
-        ${order.status === "Cancelled" ? "disabled" : ""}>
-
-        ${["Pending", "Processing", "Ready for Delivery", "Completed", "Cancelled"]
-          .map(status => `
-            <option value="${status}"
-              ${order.status === status ? "selected" : ""}>
-              ${status}
-            </option>
-          `).join("")}
+        ${order.status === "Cancelled" ? "disabled" : ""}
+      >
+        ${[
+          "Pending",
+          "Processing",
+          "Ready for Delivery",
+          "Completed",
+          "Cancelled"
+        ].map(status => `
+          <option
+            value="${status}"
+            ${order.status === status ? "selected" : ""}
+          >
+            ${status}
+          </option>
+        `).join("")}
       </select>
 
-      <button class="btn outline small"
-        onclick="viewReceipt('${order.id}')">
+      <button
+        class="btn outline small"
+        onclick="viewReceipt('${order.id}')"
+      >
         View Receipt
       </button>
     </div>
@@ -1643,6 +2221,15 @@ function updateOrderStatus(orderId, newStatus) {
     return;
   }
 
+  if (order.status === "Completed" && newStatus === "Cancelled") {
+    showToast("A completed order cannot be cancelled here.");
+    renderAdminOrders();
+    return;
+  }
+
+  const oldOrders = JSON.stringify(orders);
+  const oldProducts = JSON.stringify(products);
+
   if (newStatus === "Cancelled") {
     const restore = confirm(
       "Cancel this order and return its items to inventory?"
@@ -1655,7 +2242,10 @@ function updateOrderStatus(orderId, newStatus) {
 
     order.items.forEach(item => {
       const product = findProduct(item.productId);
-      if (product) product.stock += item.quantity;
+
+      if (product) {
+        product.stock += Number(item.quantity);
+      }
     });
 
     order.paymentStatus = "Cancelled";
@@ -1668,7 +2258,19 @@ function updateOrderStatus(orderId, newStatus) {
   order.status = newStatus;
   order.updatedAt = new Date().toISOString();
 
-  persistAll();
+  const saved =
+    save(STORAGE.orders, orders) &&
+    save(STORAGE.products, products);
+
+  if (!saved) {
+    orders = JSON.parse(oldOrders);
+    products = JSON.parse(oldProducts);
+    persistAll();
+
+    renderAdminOrders();
+
+    return showToast("Could not update the order. Please try again.");
+  }
 
   renderAdminOrders();
   renderInventory();
@@ -1688,7 +2290,10 @@ function renderAdminUsers() {
   );
 
   if (!customers.length) {
-    container.innerHTML = emptyState("No customer accounts", "Registered customers will appear here.");
+    container.innerHTML = emptyState(
+      "No customer accounts",
+      "Registered customers will appear here."
+    );
     return;
   }
 
@@ -1711,19 +2316,27 @@ function renderAdminUsers() {
               <td>${escapeHTML(user.name)}</td>
               <td>${escapeHTML(user.username)}</td>
               <td>${escapeHTML(user.phone || "Not provided")}</td>
+
               <td>
-                <span class="badge ${user.active === false ? "red" : "green"}">
+                <span class="badge ${
+                  user.active === false ? "red" : "green"
+                }">
                   ${user.active === false ? "Disabled" : "Active"}
                 </span>
               </td>
+
               <td>
-                <button class="btn outline small"
-                  onclick="toggleCustomer('${user.id}')">
+                <button
+                  class="btn outline small"
+                  onclick="toggleCustomer('${user.id}')"
+                >
                   ${user.active === false ? "Enable" : "Disable"}
                 </button>
 
-                <button class="btn danger small"
-                  onclick="deleteCustomer('${user.id}')">
+                <button
+                  class="btn danger small"
+                  onclick="deleteCustomer('${user.id}')"
+                >
                   Delete
                 </button>
               </td>
@@ -1739,16 +2352,23 @@ function toggleCustomer(userId) {
   if (!isAdmin()) return;
 
   const user = findUser(userId);
-
   if (!user || user.role !== "customer") return;
+
+  const oldActive = user.active;
 
   user.active = user.active === false;
 
-  save(STORAGE.users, users);
+  if (!save(STORAGE.users, users)) {
+    user.active = oldActive;
+    return;
+  }
+
   renderAdminUsers();
 
   showToast(
-    user.active ? "Customer account enabled." : "Customer account disabled."
+    user.active
+      ? "Customer account enabled."
+      : "Customer account disabled."
   );
 }
 
@@ -1763,10 +2383,22 @@ function deleteCustomer(userId) {
     return;
   }
 
+  const oldUsers = JSON.stringify(users);
+  const oldCarts = JSON.stringify(carts);
+
   users = users.filter(item => item.id !== userId);
   delete carts[userId];
 
-  persistAll();
+  const saved =
+    save(STORAGE.users, users) &&
+    save(STORAGE.cart, carts);
+
+  if (!saved) {
+    users = JSON.parse(oldUsers);
+    carts = JSON.parse(oldCarts);
+    persistAll();
+    return;
+  }
 
   renderAdminUsers();
   renderDashboard();
@@ -1777,6 +2409,8 @@ function deleteCustomer(userId) {
 /* -------------------- ADMIN SETTINGS -------------------- */
 
 function renderSettings() {
+  if (!currentUser || !isAdmin()) return;
+
   $("settingsUsername").value = currentUser.username;
   $("settingsPassword").value = "";
   $("settingsConfirm").value = "";
@@ -1784,7 +2418,7 @@ function renderSettings() {
   setMessage("settingsMessage", "");
 }
 
-$("settingsForm").addEventListener("submit", event => {
+on("settingsForm", "submit", event => {
   event.preventDefault();
 
   if (!isAdmin()) return;
@@ -1794,11 +2428,17 @@ $("settingsForm").addEventListener("submit", event => {
   const confirmPassword = $("settingsConfirm").value;
 
   if (username.length < 3) {
-    return setMessage("settingsMessage", "Username must have at least 3 characters.");
+    return setMessage(
+      "settingsMessage",
+      "Username must have at least 3 characters."
+    );
   }
 
   if (!/^[a-zA-Z0-9_.-]+$/.test(username)) {
-    return setMessage("settingsMessage", "Username contains invalid characters.");
+    return setMessage(
+      "settingsMessage",
+      "Username contains invalid characters."
+    );
   }
 
   const duplicate = users.some(user =>
@@ -1807,29 +2447,47 @@ $("settingsForm").addEventListener("submit", event => {
   );
 
   if (duplicate) {
-    return setMessage("settingsMessage", "That username is already taken.");
+    return setMessage(
+      "settingsMessage",
+      "That username is already taken."
+    );
   }
 
   if (password || confirmPassword) {
     if (password.length < 6) {
-      return setMessage("settingsMessage", "Password must have at least 6 characters.");
+      return setMessage(
+        "settingsMessage",
+        "Password must have at least 6 characters."
+      );
     }
 
     if (password !== confirmPassword) {
-      return setMessage("settingsMessage", "New passwords do not match.");
+      return setMessage(
+        "settingsMessage",
+        "New passwords do not match."
+      );
     }
-
-    currentUser.password = password;
   }
+
+  const oldUser = { ...currentUser };
+
+  if (password) currentUser.password = password;
 
   currentUser.username = username;
 
-  save(STORAGE.users, users);
+  if (!save(STORAGE.users, users)) {
+    Object.assign(currentUser, oldUser);
+    return;
+  }
 
   $("headerUser").textContent =
     `${currentUser.name} · ${currentUser.role}`;
 
-  setMessage("settingsMessage", "Admin settings updated successfully.", true);
+  setMessage(
+    "settingsMessage",
+    "Admin settings updated successfully.",
+    true
+  );
 
   $("settingsPassword").value = "";
   $("settingsConfirm").value = "";
@@ -1874,8 +2532,15 @@ document.addEventListener("keydown", event => {
 
 /* -------------------- START APPLICATION -------------------- */
 
-document.addEventListener("DOMContentLoaded", () => {
+function startApplication() {
+  enhancePasswordFields();
   showLogin();
   restoreSession();
   updateCartCount();
-});
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", startApplication);
+} else {
+  startApplication();
+}
