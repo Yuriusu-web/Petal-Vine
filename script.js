@@ -3,7 +3,8 @@
    PETAL & VINE FLOWER BOUTIQUE
    COMPLETE CONNECTED JAVASCRIPT
    Customer + Admin + Products + Cart + Checkout
-   Receipts + Printing + Transactions + Password Toggles
+   Selected Checkout + Receipts + Printing
+   Transactions + Password Toggles
    Front-end demonstration using localStorage
 ===================================================== */
 
@@ -37,6 +38,10 @@ let pendingPurchase = null;
 let checkoutSource = null;
 let selectedImage = "";
 let toastTimer = null;
+
+// Cart selection is remembered while the customer uses the cart.
+let selectedCartProducts = new Set();
+let cartSelectionInitializedUsers = new Set();
 
 /* -------------------- STORAGE HELPERS -------------------- */
 
@@ -95,6 +100,7 @@ function escapeHTML(value) {
 
 function showToast(message) {
   const toast = $("toast");
+
   if (!toast) {
     console.log(message);
     return;
@@ -138,11 +144,15 @@ function formatDate(date) {
 }
 
 function findProduct(id) {
-  return products.find(product => product.id === id);
+  return products.find(product =>
+    String(product.id) === String(id)
+  );
 }
 
 function findUser(id) {
-  return users.find(user => user.id === id);
+  return users.find(user =>
+    String(user.id) === String(id)
+  );
 }
 
 function isAdmin() {
@@ -151,7 +161,9 @@ function isAdmin() {
 
 function getCart() {
   if (!currentUser) return [];
-  return carts[currentUser.id] || [];
+  return Array.isArray(carts[currentUser.id])
+    ? carts[currentUser.id]
+    : [];
 }
 
 function getOrderStatusClass(status) {
@@ -171,8 +183,7 @@ function getPaymentStatusClass(status) {
 function setCart(items) {
   if (!currentUser) return false;
 
-  const previous = carts[currentUser.id] || [];
-
+  const previous = [...getCart()];
   carts[currentUser.id] = items;
 
   if (!save(STORAGE.cart, carts)) {
@@ -219,6 +230,36 @@ function initializeData() {
     carts = {};
   }
 
+  // Remove invalid saved products before normalizing them.
+  // This prevents broken products from becoming fake "Flower" entries.
+  const originalProducts = products.length;
+  const seenIds = new Set();
+
+  products = products.filter(product => {
+    if (!product || typeof product !== "object") return false;
+
+    const id = String(product.id || "").trim();
+    const name = String(product.name || "").trim();
+    const category = String(product.category || "").trim();
+
+    const price = Number(product.price);
+    const stock = Number(product.stock);
+
+    if (!id || !name || !category) return false;
+    if (!Number.isFinite(price) || price <= 0) return false;
+    if (!Number.isInteger(stock) || stock < 0) return false;
+    if (seenIds.has(id)) return false;
+
+    seenIds.add(id);
+    return true;
+  });
+
+  if (products.length !== originalProducts) {
+    console.log(
+      `${originalProducts - products.length} invalid product(s) removed.`
+    );
+  }
+
   // Create administrator if none exists.
   if (!users.some(user => user.role === "admin")) {
     users.push({
@@ -255,6 +296,7 @@ function initializeData() {
     ["Golden Sunflowers", "Sunflowers", "A bright golden bouquet full of joy.", 750, 19, "🌻"]
   ];
 
+  // Seed defaults only if there are no valid saved products.
   if (products.length === 0) {
     products = defaults.map(item => ({
       id: makeId("PRD"),
@@ -267,17 +309,22 @@ function initializeData() {
     }));
   }
 
-  // Normalize older saved products.
   products = products.map(product => ({
     ...product,
-    id: product.id || makeId("PRD"),
-    name: String(product.name || "Flower"),
-    category: String(product.category || "Flowers"),
+    id: String(product.id),
+    name: String(product.name).trim(),
+    category: String(product.category).trim(),
     description: String(product.description || ""),
-    price: Number(product.price) || 0,
-    stock: Math.max(0, Number(product.stock) || 0),
+    price: Number(product.price),
+    stock: Number(product.stock),
     image: product.image || "💐"
   }));
+
+  // Remove deleted or unavailable products from all carts.
+  Object.keys(carts).forEach(userId => {
+    carts[userId] = (Array.isArray(carts[userId]) ? carts[userId] : [])
+      .filter(item => findProduct(item.productId));
+  });
 
   persistAll();
 }
@@ -315,10 +362,7 @@ function enhancePasswordFields() {
 
   passwordIds.forEach(id => {
     const input = $(id);
-    if (!input) return;
-
-    // Do not add duplicate buttons.
-    if (input.dataset.toggleAdded === "true") return;
+    if (!input || input.dataset.toggleAdded === "true") return;
 
     const parent = input.parentElement;
 
@@ -355,7 +399,6 @@ function enhancePasswordFields() {
     });
 
     wrapper.appendChild(button);
-
     input.dataset.toggleAdded = "true";
   });
 }
@@ -365,13 +408,10 @@ function enhancePasswordFields() {
 function showLogin() {
   $("loginForm")?.classList.remove("hidden");
   $("registerForm")?.classList.add("hidden");
-
   $("authSwitch")?.classList.remove("hidden");
   $("loginSwitch")?.classList.add("hidden");
 
-  if ($("authTitle")) {
-    $("authTitle").textContent = "Welcome Back";
-  }
+  if ($("authTitle")) $("authTitle").textContent = "Welcome Back";
 
   if ($("authSubtitle")) {
     $("authSubtitle").textContent =
@@ -385,13 +425,10 @@ function showLogin() {
 function showRegister() {
   $("loginForm")?.classList.add("hidden");
   $("registerForm")?.classList.remove("hidden");
-
   $("authSwitch")?.classList.add("hidden");
   $("loginSwitch")?.classList.remove("hidden");
 
-  if ($("authTitle")) {
-    $("authTitle").textContent = "Create Account";
-  }
+  if ($("authTitle")) $("authTitle").textContent = "Create Account";
 
   if ($("authSubtitle")) {
     $("authSubtitle").textContent = "Register your customer account.";
@@ -466,7 +503,6 @@ on("registerForm", "submit", event => {
   }
 
   $("registerForm").reset();
-
   showLogin();
 
   if ($("loginUsername")) {
@@ -494,10 +530,7 @@ on("loginForm", "submit", event => {
   );
 
   if (!user) {
-    return setMessage(
-      "loginMessage",
-      "Incorrect username or password."
-    );
+    return setMessage("loginMessage", "Incorrect username or password.");
   }
 
   if (user.active === false) {
@@ -508,12 +541,12 @@ on("loginForm", "submit", event => {
   }
 
   currentUser = user;
-
   localStorage.setItem(STORAGE.session, user.id);
 
   $("loginForm").reset();
   setMessage("loginMessage", "");
 
+  selectedCartProducts.clear();
   openApplication();
 });
 
@@ -521,6 +554,7 @@ function logout() {
   currentUser = null;
   pendingPurchase = null;
   checkoutSource = null;
+  selectedCartProducts.clear();
 
   localStorage.removeItem(STORAGE.session);
 
@@ -555,8 +589,7 @@ function openApplication() {
   }
 
   if ($("welcomeText")) {
-    $("welcomeText").textContent =
-      `Welcome, ${currentUser.name}!`;
+    $("welcomeText").textContent = `Welcome, ${currentUser.name}!`;
   }
 
   $("customerNav")?.classList.toggle("hidden", isAdmin());
@@ -598,7 +631,6 @@ function hideAllPages() {
 
 function activatePage(pageId, button) {
   hideAllPages();
-
   $(pageId)?.classList.remove("hidden");
 
   if (button) button.classList.add("active");
@@ -702,14 +734,13 @@ function renderShop() {
             : "Out of stock"}
         </div>
 
-        <label class="quantity-label"
-          for="quantity-${product.id}">
+        <label class="quantity-label" for="quantity-${escapeHTML(product.id)}">
           Quantity
         </label>
 
         <input
           class="product-quantity"
-          id="quantity-${product.id}"
+          id="quantity-${escapeHTML(product.id)}"
           type="number"
           min="1"
           step="1"
@@ -721,7 +752,7 @@ function renderShop() {
         <div class="product-actions">
           <button
             class="btn outline"
-            onclick="addToCart('${product.id}')"
+            onclick="addToCart('${escapeHTML(product.id)}')"
             ${product.stock <= 0 ? "disabled" : ""}
           >
             Add to Cart
@@ -729,7 +760,7 @@ function renderShop() {
 
           <button
             class="btn primary"
-            onclick="buyNow('${product.id}')"
+            onclick="buyNow('${escapeHTML(product.id)}')"
             ${product.stock <= 0 ? "disabled" : ""}
           >
             Buy Now
@@ -777,31 +808,29 @@ function addToCart(productId) {
   const quantity = getChosenQuantity(productId);
   if (quantity === null) return;
 
-  const cart = getCart();
+  const cart = [...getCart()];
 
   const existing = cart.find(item =>
-    item.productId === productId
+    String(item.productId) === String(productId)
   );
 
-  const currentQuantity = existing
-    ? Number(existing.quantity)
-    : 0;
-
+  const currentQuantity = existing ? Number(existing.quantity) : 0;
   const newQuantity = currentQuantity + quantity;
 
   if (newQuantity > product.stock) {
-    return showToast(
-      `Only ${product.stock} flower(s) are available.`
-    );
+    return showToast(`Only ${product.stock} flower(s) are available.`);
   }
 
   if (existing) {
     existing.quantity = newQuantity;
   } else {
-    cart.push({ productId, quantity });
+    cart.push({ productId: String(productId), quantity });
   }
 
   if (!setCart(cart)) return;
+
+  // Newly added products are selected for checkout by default.
+  selectedCartProducts.add(String(productId));
 
   showToast(`${product.name} added to your cart!`);
 }
@@ -810,13 +839,17 @@ function buyNow(productId) {
   if (!currentUser || isAdmin()) return;
 
   const product = findProduct(productId);
+  if (!product) return showToast("Product not found.");
+
   const quantity = getChosenQuantity(productId);
+  if (quantity === null) return;
 
-  if (!product || quantity === null) return;
+  pendingPurchase = [{
+    productId: String(productId),
+    quantity
+  }];
 
-  pendingPurchase = [{ productId, quantity }];
   checkoutSource = "buyNow";
-
   openCheckout(pendingPurchase);
 }
 
@@ -828,12 +861,12 @@ function updateCartCount() {
     return;
   }
 
-  let cart = getCart();
+  const cart = getCart().filter(item => findProduct(item.productId));
 
-  cart = cart.filter(item => findProduct(item.productId));
-
-  carts[currentUser.id] = cart;
-  save(STORAGE.cart, carts);
+  if (cart.length !== getCart().length) {
+    carts[currentUser.id] = cart;
+    save(STORAGE.cart, carts);
+  }
 
   const count = cart.reduce((total, item) =>
     total + Number(item.quantity || 0), 0
@@ -844,17 +877,60 @@ function updateCartCount() {
   }
 }
 
+function toggleCartSelection(productId, checked) {
+  productId = String(productId);
+
+  if (checked) {
+    selectedCartProducts.add(productId);
+  } else {
+    selectedCartProducts.delete(productId);
+  }
+
+  renderCart();
+}
+
+function toggleSelectAllCart(checked) {
+  if (!currentUser) return;
+
+  if (checked) {
+    getCart().forEach(item => {
+      selectedCartProducts.add(String(item.productId));
+    });
+  } else {
+    selectedCartProducts.clear();
+  }
+
+  renderCart();
+}
+
 function renderCart() {
   const container = $("cartContent");
   if (!container || !currentUser) return;
 
-  let cart = getCart();
+  let cart = getCart().filter(item => findProduct(item.productId));
 
-  // Remove products that no longer exist.
-  cart = cart.filter(item => findProduct(item.productId));
+  if (cart.length !== getCart().length) {
+    carts[currentUser.id] = cart;
+    save(STORAGE.cart, carts);
+  }
 
-  carts[currentUser.id] = cart;
-  save(STORAGE.cart, carts);
+  // Initially select all products for a customer's first cart visit.
+  if (!cartSelectionInitializedUsers.has(currentUser.id)) {
+    cart.forEach(item => {
+      selectedCartProducts.add(String(item.productId));
+    });
+
+    cartSelectionInitializedUsers.add(currentUser.id);
+  }
+
+  // Remove selections for products no longer in the cart.
+  const cartIds = new Set(
+    cart.map(item => String(item.productId))
+  );
+
+  selectedCartProducts.forEach(id => {
+    if (!cartIds.has(id)) selectedCartProducts.delete(id);
+  });
 
   updateCartCount();
 
@@ -866,17 +942,34 @@ function renderCart() {
     return;
   }
 
-  let total = 0;
+  let selectedTotal = 0;
+  let selectedCount = 0;
 
   const rows = cart.map(item => {
     const product = findProduct(item.productId);
     if (!product) return "";
 
-    const subtotal = product.price * item.quantity;
-    total += subtotal;
+    const id = String(product.id);
+    const quantity = Number(item.quantity);
+    const subtotal = product.price * quantity;
+    const selected = selectedCartProducts.has(id);
+
+    if (selected) {
+      selectedTotal += subtotal;
+      selectedCount++;
+    }
 
     return `
       <div class="cart-row">
+        <div class="cart-select">
+          <input
+            type="checkbox"
+            aria-label="Select ${escapeHTML(product.name)}"
+            ${selected ? "checked" : ""}
+            onchange="toggleCartSelection('${escapeHTML(id)}',this.checked)"
+          >
+        </div>
+
         <div>
           <strong>${escapeHTML(product.name)}</strong>
           <p class="muted">${money(product.price)} each</p>
@@ -884,17 +977,17 @@ function renderCart() {
         </div>
 
         <div>
-          <label for="cart-qty-${product.id}">Quantity</label>
+          <label for="cart-qty-${escapeHTML(id)}">Quantity</label>
 
           <input
             class="qty-input"
-            id="cart-qty-${product.id}"
+            id="cart-qty-${escapeHTML(id)}"
             type="number"
             min="1"
             step="1"
             max="${product.stock}"
-            value="${item.quantity}"
-            onchange="updateCartQuantity('${product.id}',this.value)"
+            value="${quantity}"
+            onchange="updateCartQuantity('${escapeHTML(id)}',this.value)"
           >
         </div>
 
@@ -905,7 +998,7 @@ function renderCart() {
         <div>
           <button
             class="btn danger small"
-            onclick="removeFromCart('${product.id}')"
+            onclick="removeFromCart('${escapeHTML(id)}')"
           >
             Remove
           </button>
@@ -914,19 +1007,42 @@ function renderCart() {
     `;
   }).join("");
 
+  const allSelected = selectedCount === cart.length;
+
   container.innerHTML = `
-    <div class="panel">${rows}</div>
+    <div class="panel">
+
+      <div class="cart-selection-header">
+        <label>
+          <input
+            type="checkbox"
+            ${allSelected ? "checked" : ""}
+            onchange="toggleSelectAllCart(this.checked)"
+          >
+          Select All Products
+        </label>
+
+        <span>${selectedCount} of ${cart.length} selected</span>
+      </div>
+
+      ${rows}
+    </div>
 
     <div class="cart-total">
-      <p>Total Amount</p>
-      <strong>${money(total)}</strong>
+      <p>Selected Products: <strong>${selectedCount}</strong></p>
+
+      <p>Selected Total</p>
+
+      <strong>${money(selectedTotal)}</strong>
+
       <br><br>
 
       <button
         class="btn primary"
         onclick="checkoutCart()"
+        ${selectedCount === 0 ? "disabled" : ""}
       >
-        Proceed to Checkout
+        Checkout Selected Products
       </button>
     </div>
   `;
@@ -950,41 +1066,55 @@ function updateCartQuantity(productId, value) {
     return;
   }
 
-  const cart = getCart();
-  const item = cart.find(row => row.productId === productId);
+  const cart = [...getCart()];
+
+  const item = cart.find(row =>
+    String(row.productId) === String(productId)
+  );
 
   if (!item) return;
 
   item.quantity = quantity;
 
-  if (setCart(cart)) {
-    renderCart();
-  }
+  if (setCart(cart)) renderCart();
 }
 
 function removeFromCart(productId) {
   const cart = getCart().filter(item =>
-    item.productId !== productId
+    String(item.productId) !== String(productId)
   );
 
   if (!setCart(cart)) return;
+
+  selectedCartProducts.delete(String(productId));
 
   renderCart();
   showToast("Item removed from cart.");
 }
 
 function checkoutCart() {
-  const cart = getCart().filter(item =>
-    findProduct(item.productId)
+  const cart = getCart();
+
+  // IMPORTANT: only checked products are purchased.
+  const selectedItems = cart.filter(item =>
+    selectedCartProducts.has(String(item.productId))
   );
 
-  if (!cart.length) {
-    return showToast("Your cart is empty.");
+  if (!selectedItems.length) {
+    return showToast("Please select at least one flower to checkout.");
   }
 
-  pendingPurchase = cart.map(item => ({
-    productId: item.productId,
-    quantity: item.quantity
+  for (const item of selectedItems) {
+    const product = findProduct(item.productId);
+
+    if (!product || Number(item.quantity) > product.stock) {
+      return showToast("A selected flower does not have enough stock.");
+    }
+  }
+
+  pendingPurchase = selectedItems.map(item => ({
+    productId: String(item.productId),
+    quantity: Number(item.quantity)
   }));
 
   checkoutSource = "cart";
@@ -1002,9 +1132,9 @@ function openCheckout(items) {
 
     if (
       !product ||
-      !Number.isInteger(item.quantity) ||
-      item.quantity < 1 ||
-      item.quantity > product.stock
+      !Number.isInteger(Number(item.quantity)) ||
+      Number(item.quantity) < 1 ||
+      Number(item.quantity) > product.stock
     ) {
       pendingPurchase = null;
       checkoutSource = null;
@@ -1015,8 +1145,8 @@ function openCheckout(items) {
   }
 
   pendingPurchase = items.map(item => ({
-    productId: item.productId,
-    quantity: item.quantity
+    productId: String(item.productId),
+    quantity: Number(item.quantity)
   }));
 
   const total = pendingPurchase.reduce((sum, item) => {
@@ -1024,30 +1154,40 @@ function openCheckout(items) {
     return sum + product.price * item.quantity;
   }, 0);
 
-  $("checkoutSummary").innerHTML = `
-    ${pendingPurchase.map(item => {
-      const product = findProduct(item.productId);
+  if ($("checkoutSummary")) {
+    $("checkoutSummary").innerHTML = `
+      ${pendingPurchase.map(item => {
+        const product = findProduct(item.productId);
 
-      return `
-        <div class="receipt-line">
-          <span>
-            ${escapeHTML(product.name)} × ${item.quantity}
-          </span>
-          <strong>${money(product.price * item.quantity)}</strong>
-        </div>
-      `;
-    }).join("")}
+        return `
+          <div class="receipt-line">
+            <span>
+              ${escapeHTML(product.name)} × ${item.quantity}
+            </span>
+            <strong>${money(product.price * item.quantity)}</strong>
+          </div>
+        `;
+      }).join("")}
 
-    <div class="receipt-total">
-      Total: ${money(total)}
-    </div>
+      <div class="receipt-total">
+        Total: ${money(total)}
+      </div>
 
-    <p class="muted">Payment: Cash on Delivery (COD)</p>
-  `;
+      <p class="muted">Payment: Cash on Delivery (COD)</p>
+    `;
+  }
 
-  $("checkoutName").value = currentUser.name || "";
-  $("checkoutPhone").value = currentUser.phone || "";
-  $("checkoutAddress").value = currentUser.address || "";
+  if ($("checkoutName")) {
+    $("checkoutName").value = currentUser.name || "";
+  }
+
+  if ($("checkoutPhone")) {
+    $("checkoutPhone").value = currentUser.phone || "";
+  }
+
+  if ($("checkoutAddress")) {
+    $("checkoutAddress").value = currentUser.address || "";
+  }
 
   $("checkoutModal")?.classList.remove("hidden");
 }
@@ -1057,9 +1197,9 @@ on("checkoutForm", "submit", event => {
 
   if (!currentUser || !pendingPurchase?.length) return;
 
-  const name = $("checkoutName").value.trim();
-  const phone = $("checkoutPhone").value.trim();
-  const address = $("checkoutAddress").value.trim();
+  const name = $("checkoutName")?.value.trim() || "";
+  const phone = $("checkoutPhone")?.value.trim() || "";
+  const address = $("checkoutAddress")?.value.trim() || "";
 
   if (name.length < 2) {
     return showToast("Please enter your complete name.");
@@ -1073,7 +1213,7 @@ on("checkoutForm", "submit", event => {
     return showToast("Please enter your complete delivery address.");
   }
 
-  // Validate all products before deducting stock.
+  // Validate everything before changing stock.
   for (const item of pendingPurchase) {
     const product = findProduct(item.productId);
 
@@ -1126,30 +1266,23 @@ on("checkoutForm", "submit", event => {
   const oldCarts = JSON.stringify(carts);
   const oldUsers = JSON.stringify(users);
 
-  // Deduct stock.
+  const purchasedIds = new Set(
+    pendingPurchase.map(item => String(item.productId))
+  );
+
+  // Deduct only the purchased quantities.
   pendingPurchase.forEach(item => {
     findProduct(item.productId).stock -= item.quantity;
   });
 
-  // Remove purchased quantities from cart only for cart checkout.
+  // Remove only purchased products from the cart.
+  // Unselected products remain untouched.
   if (checkoutSource === "cart") {
-    const cart = getCart();
+    const remainingCart = getCart().filter(item =>
+      !purchasedIds.has(String(item.productId))
+    );
 
-    pendingPurchase.forEach(purchased => {
-      const existing = cart.find(item =>
-        item.productId === purchased.productId
-      );
-
-      if (existing) {
-        existing.quantity -= purchased.quantity;
-
-        if (existing.quantity <= 0) {
-          cart.splice(cart.indexOf(existing), 1);
-        }
-      }
-    });
-
-    carts[currentUser.id] = cart;
+    carts[currentUser.id] = remainingCart;
   }
 
   currentUser.name = name;
@@ -1177,13 +1310,19 @@ on("checkoutForm", "submit", event => {
     return showToast("Order could not be saved. Please try again.");
   }
 
+  // Clear purchased products from selection.
+  purchasedIds.forEach(id => selectedCartProducts.delete(id));
+
   pendingPurchase = null;
   checkoutSource = null;
 
-  $("checkoutForm").reset();
+  $("checkoutForm")?.reset();
   closeModal("checkoutModal");
 
   updateCartCount();
+
+  if (currentPage === "cart") renderCart();
+  if (currentPage === "shop") renderShop();
 
   renderReceipt(order);
   showToast("Your order has been placed successfully!");
@@ -1194,82 +1333,84 @@ on("checkoutForm", "submit", event => {
 function renderReceipt(order) {
   if (!order || !Array.isArray(order.items)) return;
 
-  $("receiptContent").innerHTML = `
-    <div class="receipt">
-      <h2>✿ Petal & Vine</h2>
-      <p>Flower Boutique</p>
-      <p class="muted">Order Receipt</p>
+  if ($("receiptContent")) {
+    $("receiptContent").innerHTML = `
+      <div class="receipt">
+        <h2>✿ Petal & Vine</h2>
+        <p>Flower Boutique</p>
+        <p class="muted">Order Receipt</p>
 
-      <hr>
+        <hr>
 
-      <div class="receipt-line">
-        <span>Receipt No.</span>
-        <strong>${escapeHTML(order.receiptNo)}</strong>
-      </div>
-
-      <div class="receipt-line">
-        <span>Order Date</span>
-        <strong>${formatDate(order.createdAt)}</strong>
-      </div>
-
-      <div class="receipt-line">
-        <span>Customer</span>
-        <strong>${escapeHTML(order.customerName)}</strong>
-      </div>
-
-      <div class="receipt-line">
-        <span>Contact</span>
-        <strong>${escapeHTML(order.phone)}</strong>
-      </div>
-
-      <div class="receipt-line">
-        <span>Address</span>
-        <strong>${escapeHTML(order.address)}</strong>
-      </div>
-
-      <h3>Order Items</h3>
-
-      ${order.items.map(item => `
         <div class="receipt-line">
-          <span>
-            ${escapeHTML(item.name)} × ${Number(item.quantity)}
-            <br>
-            <small>${money(item.price)} each</small>
-          </span>
-
-          <strong>${money(item.subtotal)}</strong>
+          <span>Receipt No.</span>
+          <strong>${escapeHTML(order.receiptNo)}</strong>
         </div>
-      `).join("")}
 
-      <div class="receipt-total">
-        Total: ${money(order.total)}
+        <div class="receipt-line">
+          <span>Order Date</span>
+          <strong>${formatDate(order.createdAt)}</strong>
+        </div>
+
+        <div class="receipt-line">
+          <span>Customer</span>
+          <strong>${escapeHTML(order.customerName)}</strong>
+        </div>
+
+        <div class="receipt-line">
+          <span>Contact</span>
+          <strong>${escapeHTML(order.phone)}</strong>
+        </div>
+
+        <div class="receipt-line">
+          <span>Address</span>
+          <strong>${escapeHTML(order.address)}</strong>
+        </div>
+
+        <h3>Order Items</h3>
+
+        ${order.items.map(item => `
+          <div class="receipt-line">
+            <span>
+              ${escapeHTML(item.name)} × ${Number(item.quantity)}
+              <br>
+              <small>${money(item.price)} each</small>
+            </span>
+
+            <strong>${money(item.subtotal)}</strong>
+          </div>
+        `).join("")}
+
+        <div class="receipt-total">
+          Total: ${money(order.total)}
+        </div>
+
+        <div class="receipt-line">
+          <span>Payment Method</span>
+          <strong>${escapeHTML(order.paymentMethod || "Cash on Delivery")}</strong>
+        </div>
+
+        <div class="receipt-line">
+          <span>Payment Status</span>
+          <strong>${escapeHTML(order.paymentStatus || "Pending")}</strong>
+        </div>
+
+        <div class="receipt-line">
+          <span>Order Status</span>
+          <strong>${escapeHTML(order.status || "Pending")}</strong>
+        </div>
+
+        <p>Thank you for shopping with Petal & Vine!</p>
+        <p class="muted">Please keep this receipt for your records.</p>
       </div>
 
-      <div class="receipt-line">
-        <span>Payment Method</span>
-        <strong>${escapeHTML(order.paymentMethod || "Cash on Delivery")}</strong>
+      <div class="receipt-actions no-print">
+        <button type="button" class="btn primary" onclick="printReceipt()">
+          Print Receipt
+        </button>
       </div>
-
-      <div class="receipt-line">
-        <span>Payment Status</span>
-        <strong>${escapeHTML(order.paymentStatus || "Pending")}</strong>
-      </div>
-
-      <div class="receipt-line">
-        <span>Order Status</span>
-        <strong>${escapeHTML(order.status || "Pending")}</strong>
-      </div>
-
-      <p>Thank you for shopping with Petal & Vine!</p>
-      <p class="muted">Please keep this receipt for your records.</p>
-    </div>
-
-    <div class="receipt-actions no-print">
-      <button type="button" class="btn primary" onclick="printReceipt()">
-        Print Receipt
-      </button>
-    </div>
-  `;
+    `;
+  }
 
   $("receiptModal")?.classList.remove("hidden");
 }
@@ -1302,9 +1443,7 @@ function printReceipt() {
           margin: auto;
         }
 
-        h2, h3, p {
-          text-align: center;
-        }
+        h2, h3, p { text-align: center; }
 
         .receipt-line {
           display: flex;
@@ -1321,9 +1460,7 @@ function printReceipt() {
           margin-top: 20px;
         }
 
-        .muted {
-          color: #777;
-        }
+        .muted { color: #777; }
 
         hr {
           border: 0;
@@ -1331,9 +1468,7 @@ function printReceipt() {
         }
 
         @media print {
-          body {
-            padding: 0;
-          }
+          body { padding: 0; }
         }
       </style>
     </head>
@@ -1354,11 +1489,11 @@ function printReceipt() {
 function viewReceipt(orderId) {
   if (!currentUser) return;
 
-  const order = orders.find(item => item.id === orderId);
+  const order = orders.find(item =>
+    String(item.id) === String(orderId)
+  );
 
-  if (!order) {
-    return showToast("Receipt not found.");
-  }
+  if (!order) return showToast("Receipt not found.");
 
   if (!isAdmin() && order.userId !== currentUser.id) {
     return showToast("You cannot view this receipt.");
@@ -1418,7 +1553,7 @@ function renderCustomerOrders() {
 
       <button
         class="btn outline small"
-        onclick="viewReceipt('${order.id}')"
+        onclick="viewReceipt('${escapeHTML(order.id)}')"
       >
         View Receipt
       </button>
@@ -1457,10 +1592,7 @@ function renderCustomerReceipts() {
         </span>
       </div>
 
-      <p>
-        Total:
-        <strong>${money(order.total)}</strong>
-      </p>
+      <p>Total: <strong>${money(order.total)}</strong></p>
 
       <p class="muted">
         Payment: ${escapeHTML(order.paymentStatus || "Pending")}
@@ -1469,7 +1601,7 @@ function renderCustomerReceipts() {
       <div class="product-actions">
         <button
           class="btn primary"
-          onclick="viewReceipt('${order.id}')"
+          onclick="viewReceipt('${escapeHTML(order.id)}')"
         >
           View / Print Receipt
         </button>
@@ -1542,9 +1674,9 @@ function renderCustomerTransactions() {
           ${myOrders.map(order => `
             <tr>
               <td>${escapeHTML(order.receiptNo)}</td>
-              <td>${new Date(order.createdAt).toLocaleDateString("en-PH")}</td>
+              <td>${formatDate(order.createdAt)}</td>
               <td>${money(order.total)}</td>
-              <td>COD</td>
+              <td>${escapeHTML(order.paymentMethod || "COD")}</td>
 
               <td>
                 <span class="badge ${getPaymentStatusClass(order.paymentStatus)}">
@@ -1561,7 +1693,7 @@ function renderCustomerTransactions() {
               <td>
                 <button
                   class="btn outline small"
-                  onclick="viewReceipt('${order.id}')"
+                  onclick="viewReceipt('${escapeHTML(order.id)}')"
                 >
                   View
                 </button>
@@ -1579,11 +1711,11 @@ function renderCustomerTransactions() {
 function renderProfile() {
   if (!currentUser) return;
 
-  $("profileName").value = currentUser.name || "";
-  $("profileUsername").value = currentUser.username || "";
-  $("profilePhone").value = currentUser.phone || "";
-  $("profileAddress").value = currentUser.address || "";
-  $("profilePassword").value = "";
+  if ($("profileName")) $("profileName").value = currentUser.name || "";
+  if ($("profileUsername")) $("profileUsername").value = currentUser.username || "";
+  if ($("profilePhone")) $("profilePhone").value = currentUser.phone || "";
+  if ($("profileAddress")) $("profileAddress").value = currentUser.address || "";
+  if ($("profilePassword")) $("profilePassword").value = "";
 
   setMessage("profileMessage", "");
 }
@@ -1600,17 +1732,11 @@ on("profileForm", "submit", event => {
   const password = $("profilePassword").value;
 
   if (name.length < 2 || username.length < 3) {
-    return setMessage(
-      "profileMessage",
-      "Please enter a valid name and username."
-    );
+    return setMessage("profileMessage", "Please enter a valid name and username.");
   }
 
   if (!/^[a-zA-Z0-9_.-]+$/.test(username)) {
-    return setMessage(
-      "profileMessage",
-      "Username contains invalid characters."
-    );
+    return setMessage("profileMessage", "Username contains invalid characters.");
   }
 
   const duplicate = users.some(user =>
@@ -1623,10 +1749,7 @@ on("profileForm", "submit", event => {
   }
 
   if (password && password.length < 6) {
-    return setMessage(
-      "profileMessage",
-      "New password must have at least 6 characters."
-    );
+    return setMessage("profileMessage", "New password must have at least 6 characters.");
   }
 
   const oldUser = { ...currentUser };
@@ -1643,9 +1766,14 @@ on("profileForm", "submit", event => {
     return;
   }
 
-  $("welcomeText").textContent = `Welcome, ${currentUser.name}!`;
-  $("headerUser").textContent =
-    `${currentUser.name} · ${currentUser.role}`;
+  if ($("welcomeText")) {
+    $("welcomeText").textContent = `Welcome, ${currentUser.name}!`;
+  }
+
+  if ($("headerUser")) {
+    $("headerUser").textContent =
+      `${currentUser.name} · ${currentUser.role}`;
+  }
 
   $("profilePassword").value = "";
 
@@ -1674,57 +1802,61 @@ function renderDashboard() {
     user.role === "customer"
   ).length;
 
-  $("dashboardStats").innerHTML = `
-    <div class="stat-card">
-      <span>Total Products</span>
-      <strong>${products.length}</strong>
-    </div>
+  if ($("dashboardStats")) {
+    $("dashboardStats").innerHTML = `
+      <div class="stat-card">
+        <span>Total Products</span>
+        <strong>${products.length}</strong>
+      </div>
 
-    <div class="stat-card">
-      <span>Total Orders</span>
-      <strong>${orders.length}</strong>
-    </div>
+      <div class="stat-card">
+        <span>Total Orders</span>
+        <strong>${orders.length}</strong>
+      </div>
 
-    <div class="stat-card">
-      <span>Customers</span>
-      <strong>${customers}</strong>
-    </div>
+      <div class="stat-card">
+        <span>Customers</span>
+        <strong>${customers}</strong>
+      </div>
 
-    <div class="stat-card">
-      <span>Order Revenue</span>
-      <strong>${money(revenue)}</strong>
-    </div>
+      <div class="stat-card">
+        <span>Order Revenue</span>
+        <strong>${money(revenue)}</strong>
+      </div>
 
-    <div class="stat-card">
-      <span>Completed Orders</span>
-      <strong>${completed}</strong>
-    </div>
+      <div class="stat-card">
+        <span>Completed Orders</span>
+        <strong>${completed}</strong>
+      </div>
 
-    <div class="stat-card">
-      <span>Pending Orders</span>
-      <strong>${pending}</strong>
-    </div>
-  `;
+      <div class="stat-card">
+        <span>Pending Orders</span>
+        <strong>${pending}</strong>
+      </div>
+    `;
+  }
 
   const recent = orders.slice(0, 5);
 
-  $("recentOrders").innerHTML = recent.length
-    ? recent.map(order => `
-        <div class="receipt-line">
-          <span>
-            <strong>${escapeHTML(order.receiptNo)}</strong>
-            <br>
-            <small>${escapeHTML(order.customerName)}</small>
-          </span>
+  if ($("recentOrders")) {
+    $("recentOrders").innerHTML = recent.length
+      ? recent.map(order => `
+          <div class="receipt-line">
+            <span>
+              <strong>${escapeHTML(order.receiptNo)}</strong>
+              <br>
+              <small>${escapeHTML(order.customerName)}</small>
+            </span>
 
-          <span>
-            ${money(order.total)}
-            <br>
-            <small>${escapeHTML(order.status)}</small>
-          </span>
-        </div>
-      `).join("")
-    : emptyState("No orders yet", "New orders will appear here.");
+            <span>
+              ${money(order.total)}
+              <br>
+              <small>${escapeHTML(order.status)}</small>
+            </span>
+          </div>
+        `).join("")
+      : emptyState("No orders yet", "New orders will appear here.");
+  }
 }
 
 /* -------------------- ADMIN PRODUCTS -------------------- */
@@ -1763,14 +1895,16 @@ function renderAdminProducts() {
         <div class="product-actions">
           <button
             class="btn outline"
-            onclick="editProduct('${product.id}')"
+            type="button"
+            onclick="editProduct('${escapeHTML(product.id)}')"
           >
             Edit
           </button>
 
           <button
             class="btn danger"
-            onclick="deleteProduct('${product.id}')"
+            type="button"
+            onclick="deleteProduct('${escapeHTML(product.id)}')"
           >
             Delete
           </button>
@@ -1785,16 +1919,23 @@ on("adminProductSearch", "input", renderAdminProducts);
 function openProductModal() {
   if (!isAdmin()) return;
 
-  $("productForm").reset();
-  $("productId").value = "";
-  $("productModalTitle").textContent = "Add Product";
-  $("productImage").value = "💐";
-  $("productImageFile").value = "";
+  $("productForm")?.reset();
+
+  if ($("productId")) $("productId").value = "";
+  if ($("productModalTitle")) {
+    $("productModalTitle").textContent = "Add Product";
+  }
+
+  if ($("productImage")) $("productImage").value = "💐";
+  if ($("productImageFile")) $("productImageFile").value = "";
 
   selectedImage = "";
-  $("productImagePreview").textContent = "💐";
 
-  $("productModal").classList.remove("hidden");
+  if ($("productImagePreview")) {
+    $("productImagePreview").textContent = "💐";
+  }
+
+  $("productModal")?.classList.remove("hidden");
 }
 
 function editProduct(productId) {
@@ -1803,7 +1944,11 @@ function editProduct(productId) {
   const product = findProduct(productId);
 
   if (!product) {
-    return showToast("Product not found.");
+    return showToast("Product not found. Refresh the product list.");
+  }
+
+  if (!$("productForm")) {
+    return showToast("Product form is missing from your HTML.");
   }
 
   $("productId").value = product.id;
@@ -1821,7 +1966,7 @@ function editProduct(productId) {
 
   showProductPreview(selectedImage);
 
-  $("productModal").classList.remove("hidden");
+  $("productModal")?.classList.remove("hidden");
 }
 
 function showProductPreview(value) {
@@ -1876,7 +2021,7 @@ on("productImageFile", "change", event => {
   reader.readAsDataURL(file);
 });
 
-/* ADD / EDIT PRODUCT */
+/* -------------------- ADD / EDIT PRODUCT -------------------- */
 
 on("productForm", "submit", event => {
   event.preventDefault();
@@ -1924,10 +2069,10 @@ on("productForm", "submit", event => {
     product.stock = stock;
     product.image = image;
 
-    // Update cart quantities if the stock was reduced.
+    // Remove cart quantities that exceed the new stock.
     Object.keys(carts).forEach(userId => {
       carts[userId] = (carts[userId] || []).map(item => {
-        if (item.productId !== id) return item;
+        if (String(item.productId) !== String(id)) return item;
 
         return {
           ...item,
@@ -1961,14 +2106,7 @@ on("productForm", "submit", event => {
 
   closeModal("productModal");
 
-  renderAdminProducts();
-  renderInventory();
-  renderDashboard();
-
-  if (currentPage === "shop") renderShop();
-  if (currentPage === "cart") renderCart();
-
-  updateCartCount();
+  refreshProductViews();
 
   showToast(
     id
@@ -1977,7 +2115,7 @@ on("productForm", "submit", event => {
   );
 });
 
-/* DELETE PRODUCT */
+/* -------------------- DELETE PRODUCT -------------------- */
 
 function deleteProduct(productId) {
   if (!isAdmin()) return;
@@ -1988,9 +2126,7 @@ function deleteProduct(productId) {
     return showToast("Product not found.");
   }
 
-  if (!confirm(
-    `Are you sure you want to delete "${product.name}"?`
-  )) {
+  if (!confirm(`Are you sure you want to delete "${product.name}"?`)) {
     return;
   }
 
@@ -1998,15 +2134,17 @@ function deleteProduct(productId) {
   const oldCarts = JSON.stringify(carts);
 
   products = products.filter(item =>
-    item.id !== productId
+    String(item.id) !== String(productId)
   );
 
-  // Remove deleted product from every customer's cart.
+  // Remove the deleted flower from every customer's cart.
   Object.keys(carts).forEach(userId => {
     carts[userId] = (carts[userId] || []).filter(item =>
-      item.productId !== productId
+      String(item.productId) !== String(productId)
     );
   });
+
+  selectedCartProducts.delete(String(productId));
 
   const saved =
     save(STORAGE.products, products) &&
@@ -2019,16 +2157,20 @@ function deleteProduct(productId) {
     return;
   }
 
+  refreshProductViews();
+
+  showToast(`${product.name} deleted successfully!`);
+}
+
+/* -------------------- REFRESH PRODUCT VIEWS -------------------- */
+
+function refreshProductViews() {
   renderAdminProducts();
   renderInventory();
   renderDashboard();
-
-  if (currentPage === "shop") renderShop();
-  if (currentPage === "cart") renderCart();
-
+  renderShop();
+  renderCart();
   updateCartCount();
-
-  showToast(`${product.name} deleted successfully!`);
 }
 
 /* -------------------- ADMIN INVENTORY -------------------- */
@@ -2088,14 +2230,14 @@ function renderInventory() {
               <td>
                 <button
                   class="btn outline small"
-                  onclick="editProduct('${product.id}')"
+                  onclick="editProduct('${escapeHTML(product.id)}')"
                 >
                   Edit
                 </button>
 
                 <button
                   class="btn danger small"
-                  onclick="deleteProduct('${product.id}')"
+                  onclick="deleteProduct('${escapeHTML(product.id)}')"
                 >
                   Delete
                 </button>
@@ -2157,20 +2299,18 @@ function renderAdminOrders() {
 
       ${order.items.map(item => `
         <div class="receipt-line">
-          <span>
-            ${escapeHTML(item.name)} × ${item.quantity}
-          </span>
+          <span>${escapeHTML(item.name)} × ${item.quantity}</span>
           <strong>${money(item.subtotal)}</strong>
         </div>
       `).join("")}
 
       <div class="receipt-total">${money(order.total)}</div>
 
-      <label for="status-${order.id}">Order Status</label>
+      <label for="status-${escapeHTML(order.id)}">Order Status</label>
 
       <select
-        id="status-${order.id}"
-        onchange="updateOrderStatus('${order.id}',this.value)"
+        id="status-${escapeHTML(order.id)}"
+        onchange="updateOrderStatus('${escapeHTML(order.id)}',this.value)"
         ${order.status === "Cancelled" ? "disabled" : ""}
       >
         ${[
@@ -2191,7 +2331,7 @@ function renderAdminOrders() {
 
       <button
         class="btn outline small"
-        onclick="viewReceipt('${order.id}')"
+        onclick="viewReceipt('${escapeHTML(order.id)}')"
       >
         View Receipt
       </button>
@@ -2212,7 +2352,10 @@ function updateOrderStatus(orderId, newStatus) {
 
   if (!allowed.includes(newStatus)) return;
 
-  const order = orders.find(item => item.id === orderId);
+  const order = orders.find(item =>
+    String(item.id) === String(orderId)
+  );
+
   if (!order) return;
 
   if (order.status === "Cancelled") {
@@ -2328,14 +2471,14 @@ function renderAdminUsers() {
               <td>
                 <button
                   class="btn outline small"
-                  onclick="toggleCustomer('${user.id}')"
+                  onclick="toggleCustomer('${escapeHTML(user.id)}')"
                 >
                   ${user.active === false ? "Enable" : "Disable"}
                 </button>
 
                 <button
                   class="btn danger small"
-                  onclick="deleteCustomer('${user.id}')"
+                  onclick="deleteCustomer('${escapeHTML(user.id)}')"
                 >
                   Delete
                 </button>
@@ -2355,7 +2498,6 @@ function toggleCustomer(userId) {
   if (!user || user.role !== "customer") return;
 
   const oldActive = user.active;
-
   user.active = user.active === false;
 
   if (!save(STORAGE.users, users)) {
@@ -2376,7 +2518,6 @@ function deleteCustomer(userId) {
   if (!isAdmin()) return;
 
   const user = findUser(userId);
-
   if (!user || user.role !== "customer") return;
 
   if (!confirm(`Delete customer account "${user.username}"?`)) {
@@ -2411,9 +2552,12 @@ function deleteCustomer(userId) {
 function renderSettings() {
   if (!currentUser || !isAdmin()) return;
 
-  $("settingsUsername").value = currentUser.username;
-  $("settingsPassword").value = "";
-  $("settingsConfirm").value = "";
+  if ($("settingsUsername")) {
+    $("settingsUsername").value = currentUser.username;
+  }
+
+  if ($("settingsPassword")) $("settingsPassword").value = "";
+  if ($("settingsConfirm")) $("settingsConfirm").value = "";
 
   setMessage("settingsMessage", "");
 }
@@ -2428,17 +2572,11 @@ on("settingsForm", "submit", event => {
   const confirmPassword = $("settingsConfirm").value;
 
   if (username.length < 3) {
-    return setMessage(
-      "settingsMessage",
-      "Username must have at least 3 characters."
-    );
+    return setMessage("settingsMessage", "Username must have at least 3 characters.");
   }
 
   if (!/^[a-zA-Z0-9_.-]+$/.test(username)) {
-    return setMessage(
-      "settingsMessage",
-      "Username contains invalid characters."
-    );
+    return setMessage("settingsMessage", "Username contains invalid characters.");
   }
 
   const duplicate = users.some(user =>
@@ -2447,32 +2585,22 @@ on("settingsForm", "submit", event => {
   );
 
   if (duplicate) {
-    return setMessage(
-      "settingsMessage",
-      "That username is already taken."
-    );
+    return setMessage("settingsMessage", "That username is already taken.");
   }
 
   if (password || confirmPassword) {
     if (password.length < 6) {
-      return setMessage(
-        "settingsMessage",
-        "Password must have at least 6 characters."
-      );
+      return setMessage("settingsMessage", "Password must have at least 6 characters.");
     }
 
     if (password !== confirmPassword) {
-      return setMessage(
-        "settingsMessage",
-        "New passwords do not match."
-      );
+      return setMessage("settingsMessage", "New passwords do not match.");
     }
   }
 
   const oldUser = { ...currentUser };
 
   if (password) currentUser.password = password;
-
   currentUser.username = username;
 
   if (!save(STORAGE.users, users)) {
@@ -2480,14 +2608,12 @@ on("settingsForm", "submit", event => {
     return;
   }
 
-  $("headerUser").textContent =
-    `${currentUser.name} · ${currentUser.role}`;
+  if ($("headerUser")) {
+    $("headerUser").textContent =
+      `${currentUser.name} · ${currentUser.role}`;
+  }
 
-  setMessage(
-    "settingsMessage",
-    "Admin settings updated successfully.",
-    true
-  );
+  setMessage("settingsMessage", "Admin settings updated successfully.", true);
 
   $("settingsPassword").value = "";
   $("settingsConfirm").value = "";
